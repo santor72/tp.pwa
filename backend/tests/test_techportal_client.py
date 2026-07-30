@@ -1,0 +1,87 @@
+import json
+
+import httpx
+import pytest
+
+from app.config import Settings
+from app.errors import ApiError, ServiceUnavailableError, TechPortalNotConfiguredError
+from app.techportal_client import TechPortalClient
+
+
+def settings() -> Settings:
+    return Settings(
+        tp_base_url="https://tp.example/api/v1",
+        tp_base_token="system-token",
+    )
+
+
+def test_api_base_path_does_not_change_auth_origin() -> None:
+    assert settings().tp_origin_url == "https://tp.example"
+
+
+@pytest.mark.asyncio
+async def test_ticket_list_uses_bearer_full_base_path_and_page_zero() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url == httpx.URL("https://tp.example/api/v1/tickets/get")
+        assert request.headers["Authorization"] == "Bearer system-token"
+        payload = json.loads(request.content)
+        assert payload["page"] == 0
+        assert payload["filters"]["and"][0] == {
+            "tags": {},
+            "createdBy": [],
+            "masterIds": [87],
+            "closedFrom": "-",
+            "scheduledTo": "30.07.2026",
+            "scheduledFrom": "30.07.2026",
+        }
+        return httpx.Response(200, json=[])
+
+    result = await TechPortalClient(
+        settings(),
+        transport=httpx.MockTransport(handler),
+    ).tickets(87, "30.07.2026")
+
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_persist_sends_complete_tags_element() -> None:
+    tags = {"Новое подключение": {}, "Работы произведены": {}}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url == httpx.URL("https://tp.example/api/v1/tickets/persist")
+        assert json.loads(request.content) == {"ticket": {"id": 32412, "tags": tags}}
+        return httpx.Response(
+            200,
+            json={"id": 32412, "masters": [87], "tags": tags},
+        )
+
+    ticket = await TechPortalClient(
+        settings(),
+        transport=httpx.MockTransport(handler),
+    ).persist_ticket(32412, tags)
+
+    assert ticket.tags == tags
+
+
+@pytest.mark.asyncio
+async def test_client_maps_configuration_auth_and_network_errors() -> None:
+    with pytest.raises(TechPortalNotConfiguredError):
+        await TechPortalClient(Settings(tp_base_token="")).users()
+
+    auth_client = TechPortalClient(
+        settings(),
+        transport=httpx.MockTransport(lambda _: httpx.Response(401, json={})),
+    )
+    with pytest.raises(ApiError) as auth_error:
+        await auth_client.users()
+    assert auth_error.value.code == "TECHPORTAL_AUTH_FAILED"
+
+    def timeout(_: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("timeout")
+
+    with pytest.raises(ServiceUnavailableError):
+        await TechPortalClient(
+            settings(),
+            transport=httpx.MockTransport(timeout),
+        ).users()

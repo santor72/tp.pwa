@@ -1,0 +1,280 @@
+import logging
+import time
+import uuid
+from contextlib import asynccontextmanager
+from typing import Literal
+
+from fastapi import Depends, FastAPI, Request, Response
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from redis.asyncio import Redis
+from redis.exceptions import RedisError
+
+from app.auth_provider import TechPortalAuthProvider
+from app.cache_store import CacheStore
+from app.config import Settings, get_settings
+from app.dependencies import get_session_store, require_csrf, require_session, verify_origin
+from app.domofon import DomofonService
+from app.errors import ApiError, SessionExpiredError
+from app.esb_client import EsbClient
+from app.logging import audit, configure_logging, request_id_ctx, stable_hash
+from app.schemas import (
+    DomofonAddress,
+    DomofonConnectRequest,
+    DomofonCreateRequest,
+    DomofonOperationResponse,
+    ErrorResponse,
+    LoginRequest,
+    SessionResponse,
+    TicketCompletionRequest,
+    TicketResponse,
+)
+from app.session_store import SessionStore
+from app.techportal_client import TechPortalClient
+from app.tickets import TicketService
+
+settings = get_settings()
+configure_logging(settings.log_level)
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    session_redis = Redis.from_url(settings.session_redis_url, decode_responses=True)
+    cache_redis = Redis.from_url(settings.cache_redis_url, decode_responses=True)
+    app.state.session_redis = session_redis
+    app.state.cache_redis = cache_redis
+    app.state.session_store = SessionStore(session_redis, settings)
+    app.state.auth_provider = TechPortalAuthProvider(settings)
+    cache_store = CacheStore(cache_redis)
+    app.state.domofon_service = DomofonService(settings, EsbClient(settings), cache_store)
+    app.state.ticket_service = TicketService(settings, TechPortalClient(settings), cache_store)
+    yield
+    await session_redis.aclose()
+    await cache_redis.aclose()
+
+
+app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def request_logging(request: Request, call_next):
+    request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
+    token = request_id_ctx.set(request_id)
+    started = time.perf_counter()
+    try:
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        audit(
+            logger,
+            "http.request.completed",
+            method=request.method,
+            path=request.url.path,
+            http_status=response.status_code,
+            duration_ms=round((time.perf_counter() - started) * 1000),
+        )
+        return response
+    finally:
+        request_id_ctx.reset(token)
+
+
+@app.exception_handler(ApiError)
+async def api_error_handler(_: Request, exc: ApiError) -> JSONResponse:
+    payload = ErrorResponse(code=exc.code, message=exc.message, request_id=request_id_ctx.get())
+    return JSONResponse(status_code=exc.status_code, content=payload.model_dump())
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(_: Request, __: RequestValidationError) -> JSONResponse:
+    payload = ErrorResponse(
+        code="VALIDATION_ERROR",
+        message="Проверьте заполнение обязательных полей",
+        request_id=request_id_ctx.get(),
+    )
+    return JSONResponse(status_code=422, content=payload.model_dump())
+
+
+@app.exception_handler(Exception)
+async def unexpected_error_handler(_: Request, exc: Exception) -> JSONResponse:
+    logger.exception("Необработанная ошибка", extra={"event": "internal.error", "fields": {"error": type(exc).__name__}})
+    payload = ErrorResponse(code="INTERNAL_ERROR", message="Внутренняя ошибка сервиса", request_id=request_id_ctx.get())
+    return JSONResponse(status_code=500, content=payload.model_dump())
+
+
+def set_session_cookie(response: Response, session_id: str) -> None:
+    response.set_cookie(
+        key=settings.session_cookie_name,
+        value=session_id,
+        httponly=True,
+        secure=settings.session_cookie_secure,
+        samesite="strict",
+        path="/",
+        max_age=settings.session_absolute_ttl_seconds,
+    )
+
+
+def clear_session_cookie(response: Response) -> None:
+    response.delete_cookie(key=settings.session_cookie_name, path="/", httponly=True, secure=settings.session_cookie_secure, samesite="strict")
+
+
+@app.get("/health/live")
+async def health_live() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.get("/health/ready")
+async def health_ready(request: Request) -> dict[str, str]:
+    try:
+        await request.app.state.session_redis.ping()
+        await request.app.state.cache_redis.ping()
+    except RedisError as exc:
+        raise ApiError(503, "REDIS_UNAVAILABLE", "Redis недоступен") from exc
+    return {"status": "ok"}
+
+
+@app.post("/api/auth/login", response_model=SessionResponse)
+async def login(payload: LoginRequest, response: Response, request: Request) -> SessionResponse:
+    verify_origin(request, settings)
+    try:
+        user = await request.app.state.auth_provider.authenticate(payload.email, payload.password)
+    except ApiError as exc:
+        audit(logger, "auth.login.failed", result="failure", login_hash=stable_hash(payload.email), code=exc.code)
+        raise
+    session_id, session = await get_session_store(request).create(user)
+    set_session_cookie(response, session_id)
+    audit(logger, "auth.login.succeeded", user_id=user.id, result="success", session_hash=stable_hash(session_id))
+    return SessionResponse(user=user, csrf_token=session.csrf_token)
+
+
+@app.get("/api/auth/session", response_model=SessionResponse)
+async def get_session(session_pair: tuple[str, object] = Depends(require_session)) -> SessionResponse:
+    _, session = session_pair
+    return SessionResponse(user=session.user, csrf_token=session.csrf_token)
+
+
+@app.post("/api/auth/logout", status_code=204)
+async def logout(
+    session_pair: tuple[str, object] = Depends(require_csrf),
+    store: SessionStore = Depends(get_session_store),
+) -> Response:
+    session_id, session = session_pair
+    await store.delete(session_id)
+    response = Response(status_code=204)
+    clear_session_cookie(response)
+    audit(logger, "auth.logout", user_id=session.user.id, result="success", session_hash=stable_hash(session_id))
+    return response
+
+
+@app.get("/api/tickets/{day}", response_model=list[TicketResponse])
+async def tickets_for_day(
+    day: Literal["today", "tomorrow"],
+    request: Request,
+    session_pair: tuple[str, object] = Depends(require_session),
+) -> list[TicketResponse]:
+    _, session = session_pair
+    try:
+        result = await request.app.state.ticket_service.list_for_day(session.user.id, day)
+    except ApiError as exc:
+        audit(
+            logger,
+            "tickets.list.failed",
+            user_id=session.user.id,
+            day=day,
+            result="failure",
+            code=exc.code,
+        )
+        raise
+    audit(
+        logger,
+        "tickets.list.succeeded",
+        user_id=session.user.id,
+        day=day,
+        count=len(result),
+        result="success",
+    )
+    return result
+
+
+@app.post("/api/tickets/{ticket_id}/completion", response_model=TicketResponse)
+async def set_ticket_completion(
+    ticket_id: int,
+    payload: TicketCompletionRequest,
+    request: Request,
+    session_pair: tuple[str, object] = Depends(require_csrf),
+) -> TicketResponse:
+    _, session = session_pair
+    try:
+        result = await request.app.state.ticket_service.set_completed(
+            session.user.id,
+            payload.day,
+            ticket_id,
+            payload.completed,
+        )
+    except ApiError as exc:
+        audit(
+            logger,
+            "tickets.completion.failed",
+            user_id=session.user.id,
+            ticket_id=ticket_id,
+            day=payload.day,
+            result="failure",
+            code=exc.code,
+        )
+        raise
+    audit(
+        logger,
+        "tickets.completion.changed",
+        user_id=session.user.id,
+        ticket_id=ticket_id,
+        day=payload.day,
+        completed=payload.completed,
+        result="success",
+    )
+    return result
+
+
+@app.post("/api/domofon/connect", response_model=DomofonOperationResponse)
+async def domofon_connect(
+    payload: DomofonConnectRequest,
+    request: Request,
+    session_pair: tuple[str, object] = Depends(require_csrf),
+) -> DomofonOperationResponse:
+    _, session = session_pair
+    try:
+        result = await request.app.state.domofon_service.connect(payload)
+    except ApiError as exc:
+        audit(logger, "domofon.connect.failed", user_id=session.user.id, result="failure", code=exc.code)
+        raise
+    audit(logger, "domofon.connect.succeeded", user_id=session.user.id, result="success")
+    return result
+
+
+@app.get("/api/domofon/addresses", response_model=list[DomofonAddress])
+async def domofon_addresses(
+    request: Request,
+    session_pair: tuple[str, object] = Depends(require_session),
+) -> list[DomofonAddress]:
+    _, session = session_pair
+    try:
+        result = await request.app.state.domofon_service.addresses()
+    except ApiError as exc:
+        audit(logger, "domofon.addresses.failed", user_id=session.user.id, result="failure", code=exc.code)
+        raise
+    audit(logger, "domofon.addresses.requested", user_id=session.user.id, result="success")
+    return result
+
+
+@app.post("/api/domofon/create", response_model=DomofonOperationResponse)
+async def domofon_create(
+    payload: DomofonCreateRequest,
+    request: Request,
+    session_pair: tuple[str, object] = Depends(require_csrf),
+) -> DomofonOperationResponse:
+    _, session = session_pair
+    try:
+        result = await request.app.state.domofon_service.create(payload)
+    except ApiError as exc:
+        audit(logger, "domofon.create.failed", user_id=session.user.id, result="failure", code=exc.code)
+        raise
+    audit(logger, "domofon.create.succeeded", user_id=session.user.id, result="success")
+    return result

@@ -1,0 +1,10 @@
+{
+  "description": "This web app streamlines access to services with a secure login, allowing users to manage requests and connect to intercom systems efficiently.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

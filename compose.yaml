@@ -1,0 +1,73 @@
+services:
+  redis:
+    image: redis:7.4-alpine
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: "127.0.0.1:24224"
+        fluentd-async: "true"
+        tag: "tppwa.redis"
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: "127.0.0.1:24224"
+        fluentd-async: "true"
+        tag: "tppwa.api"
+    env_file: .env
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      SESSION_COOKIE_SECURE: "false"
+      ALLOWED_ORIGINS: http://localhost:8081,http://127.0.0.1:8081
+      ESB_BASE_URL: ${ESB_BASE_URL:-}
+      ESB_BASE_TOKEN: ${ESB_BASE_TOKEN:-}
+      SESSION_ABSOLUTE_TTL_SECONDS: ${SESSION_TTL_SECONDS:-43200}
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: "127.0.0.1:24224"
+        fluentd-async: "true"
+        tag: "tppwa.frontend"
+    ports:
+      - "127.0.0.1:8081:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  vector:
+    user: "0:0"
+    image: timberio/vector:0.44.0-alpine
+    command: ["--config", "/etc/vector/vector.toml"]
+    ports:
+      - "127.0.0.1:24224:24224"
+    volumes:
+      - ./infrastructure/vector/vector.toml:/etc/vector/vector.toml:ro
+
+volumes:
+  redis-data:

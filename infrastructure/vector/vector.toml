@@ -1,0 +1,20 @@
+[sources.docker]
+type = "fluent"
+address = "0.0.0.0:24224"
+
+[transforms.normalized]
+type = "remap"
+inputs = ["docker"]
+source = '''
+  del(.password)
+  del(.authorization)
+  del(.cookie)
+  del(.csrf_token)
+  del(.client_name)
+  del(.phone)
+'''
+
+[sinks.console]
+type = "console"
+inputs = ["normalized"]
+encoding.codec = "json"

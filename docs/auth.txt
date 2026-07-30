@@ -1,0 +1,57 @@
+## Авторизация
+Как работает авторизация вы web версии Техпортала
+• Вход работает так:
+
+  Форма /login
+    → POST /api/techportal-user/login
+    → сервер возвращает JSON профиля + токен
+    → фронтенд переходит на /clients
+
+  Запрос:
+
+  POST https://tp.point.online/api/techportal-user/login
+  Content-Type: application/json
+
+  {
+    "email": "<email>",
+    "password": "<password>"
+  }
+
+  Фактический ответ при успешном входе — 200 OK, JSON. В нём есть:
+
+  {
+    "id": 3,
+    "email": "<email>",
+    "firstName": "<имя>",
+    "status": "admin",
+    "properties": {
+      "branch": 1,
+      "number": "<внутренний номер>",
+      "tickets": {
+        "customFilters": [...],
+        "customSortingOrder": {...},
+        "defaultCustomFilterId": 0
+      },
+      "permissions": {...},
+      "restoreLink": "<идентификатор>"
+    }
+  }
+
+  То есть сервер в ответе одновременно отдаёт:
+  - данные пользователя и его роль;
+  - права доступа;
+  - пользовательские настройки раздела заявок, включая сохранённые фильтры и сортировку.
+  После успешного ответа интерфейс перенаправляет пользователя на /clients.
+  Дополнение
+  браузер отправляет обязательный заголовок CSRF, а в Python-коде его нет. Поэтому сервер отвечает 403 Forbidden.
+
+  В реальном запросе есть:
+
+  POST /api/techportal-user/login
+  Content-Type: application/json
+  Accept: application/json, text/plain, */*
+  Referer: https://tp.point.online/login
+  X-CSRF-Token: <динамический токен>
+  Но csrf_token нельзя захардкодить: он динамический и должен получаться штатным bootstrap-запросом приложения. делает GET /csrf-token, получает { "_csrf": "..." }, затем передаёт этот токен в X-CSRF-Token при POST /api/techportal-user/login.
+пример реализации функции авторизации в
+examples/auth.py
