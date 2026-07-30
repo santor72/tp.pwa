@@ -27,6 +27,35 @@ Frontend и API работают на одном origin. В Docker Compose па�
 cookie отключён только для локального HTTP. В production он должен быть включён
 и приложение должно работать за HTTPS.
 
+## Production
+
+Создайте production override и укажите в нём публичный HTTPS origin:
+
+```bash
+cp compose.prod.yaml.sample compose.prod.yaml
+```
+
+Затем запустите приложение:
+
+```bash
+docker compose \
+  -f compose.yaml \
+  -f compose.prod.yaml \
+  up -d --build
+```
+
+Проверка состояния и health-check:
+
+```bash
+docker compose -f compose.yaml -f compose.prod.yaml ps
+curl http://127.0.0.1:8081/health/live
+curl http://127.0.0.1:8081/health/ready
+```
+
+Оба health-check должны вернуть `{"status":"ok"}`. Порт `8081` доступен только
+на loopback-интерфейсе; публичный HTTPS reverse proxy должен перенаправлять
+запросы на `127.0.0.1:8081`.
+
 ## Сервисы
 
 - `frontend` — Nginx со статической PWA и reverse proxy `/api`;

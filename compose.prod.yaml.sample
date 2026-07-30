@@ -1,0 +1,5 @@
+services:
+  api:
+    environment:
+      SESSION_COOKIE_SECURE: "true"
+      ALLOWED_ORIGINS: "https://pwa.example.ru"
