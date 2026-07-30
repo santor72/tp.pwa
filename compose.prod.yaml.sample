@@ -1,5 +1,29 @@
 services:
+  frontend:
+      restart: unless-stopped
   api:
+    restart: unless-stopped
     environment:
       SESSION_COOKIE_SECURE: "true"
       ALLOWED_ORIGINS: "https://pwa.example.ru"
+    redis:
+      restart: unless-stopped
+      command:
+        - redis-server
+        - --appendonly
+        - "yes"
+        - --appendfsync
+        - everysec
+        - --maxmemory
+        - 256mb
+        - --maxmemory-policy
+        - noeviction
+      mem_limit: 384m
+    vector:
+      restart: unless-stopped
+      mem_limit: 256m
+      logging:
+        driver: local
+        options:
+          max-size: "20m"
+          max-file: "5"
