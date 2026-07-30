@@ -9,6 +9,7 @@
 
 * { box-sizing: border-box; }
 html, body, #root { min-height: 100%; margin: 0; }
+body { min-height: 100svh; }
 button, input { font: inherit; }
 a { color: #1d4ed8; overflow-wrap: anywhere; }
 button { cursor: pointer; }
@@ -261,8 +262,119 @@ input:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px #dbeafe; }
 .comment-card time { color: #64748b; font-size: .68rem; text-align: right; }
 .comment-card p { margin: .55rem 0 0; color: #334155; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 
+@media (max-width: 600px) {
+  .login-page {
+    min-height: 100svh;
+    min-height: 100dvh;
+    align-items: stretch;
+    padding: 0;
+  }
+  .login-shell {
+    width: 100%;
+    min-height: 100svh;
+    min-height: 100dvh;
+    display: grid;
+    grid-template-rows: auto auto auto 1fr;
+    padding-top: max(2rem, env(safe-area-inset-top));
+  }
+  .brand-mark {
+    width: 4.75rem;
+    height: 4.75rem;
+    border-radius: 1.45rem;
+    font-size: 1.15rem;
+  }
+  .login-shell > h1 {
+    margin-top: .9rem;
+    font-size: 1.85rem;
+  }
+  .login-subtitle {
+    margin: .25rem 0 1.25rem;
+    font-size: 1rem;
+  }
+  .login-panel {
+    width: 100%;
+    min-height: 58dvh;
+    align-self: end;
+    align-content: start;
+    gap: 1.25rem;
+    padding: 2rem 1.25rem max(2rem, env(safe-area-inset-bottom));
+    border-width: 0;
+    border-radius: 1.75rem 1.75rem 0 0;
+    box-shadow: 0 -12px 36px #0f172a24;
+  }
+  .login-panel .field {
+    gap: .55rem;
+  }
+  .login-panel .field > span {
+    font-size: .8rem;
+  }
+  .login-panel input,
+  .login-panel .primary-button {
+    min-height: 3.5rem;
+    font-size: 1rem;
+  }
+  .tickets-heading h1 {
+    font-size: 1.65rem;
+  }
+  .tickets-heading p {
+    font-size: 1rem;
+  }
+  .ticket-card {
+    gap: .7rem;
+    padding: 1.15rem;
+  }
+  .ticket-kind,
+  .ticket-status {
+    min-height: 1.8rem;
+    padding: .32rem .6rem;
+    font-size: .78rem;
+    line-height: 1.2;
+  }
+  .ticket-address {
+    font-size: 1.1rem;
+    line-height: 1.45;
+  }
+  .ticket-scheduled {
+    padding: .4rem .65rem;
+    font-size: .9rem;
+  }
+  .ticket-scheduled strong {
+    font-size: 1rem;
+  }
+  .ticket-card > a {
+    font-size: 1rem;
+  }
+  .ticket-muted {
+    font-size: .95rem;
+  }
+  .long-press-hint {
+    font-size: .8rem;
+    line-height: 1.35;
+  }
+  .ticket-detail-main dt {
+    font-size: .78rem;
+  }
+  .ticket-detail-main dd,
+  .ticket-description p {
+    font-size: 1rem;
+  }
+  .ticket-description h2,
+  .comments-section h2 {
+    font-size: 1.1rem;
+  }
+  .comment-card strong {
+    font-size: .92rem;
+  }
+  .comment-card time {
+    font-size: .78rem;
+  }
+  .comment-card p {
+    font-size: 1rem;
+  }
+}
+
 @media (max-width: 380px) {
   .location-grid, .field-row { grid-template-columns: 1fr; }
   .ticket-card-top { align-items: flex-start; }
-  .ticket-kind, .ticket-status { font-size: .62rem; }
+  .ticket-kind, .ticket-status { font-size: .74rem; }
 }
