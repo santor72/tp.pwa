@@ -101,3 +101,13 @@ class FlatAlreadyAssignedError(ApiError):
             "FLAT_ALREADY_ASSIGNED",
             "Квартира уже привязана к пользователю домофона",
         )
+
+
+class MessengerLinkError(ApiError):
+    def __init__(self, code: str, message: str, status_code: int = status.HTTP_409_CONFLICT) -> None:
+        super().__init__(status_code, code, message)
+
+
+class MessengerLinkTokenError(MessengerLinkError):
+    def __init__(self) -> None:
+        super().__init__("MESSENGER_LINK_TOKEN_INVALID", "Ссылка для привязки недействительна или истекла", status.HTTP_400_BAD_REQUEST)

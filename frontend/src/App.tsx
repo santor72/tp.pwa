@@ -14,12 +14,14 @@ import {
   DomofonAddress,
   DomofonOperationResult,
   Session,
+  MessengerLink,
+  MessengerLinkCreate,
   Ticket,
   TicketDay,
 } from './api'
 
 type AppScreen = 'loading' | 'login' | 'app'
-type AppTab = TicketDay | 'domofon'
+type AppTab = TicketDay | 'domofon' | 'settings'
 type DomofonScreen = 'main' | 'connect-result' | 'addresses' | 'create-form' | 'create-result'
 
 function errorMessage(error: unknown): string {
@@ -90,6 +92,47 @@ function Field({ label, required = false, children }: { label: string; required?
 
 function ErrorBox({ text }: { text: string }) {
   return <div role="alert" className="error-box">{text}</div>
+}
+
+function Settings({ session }: { session: Session }) {
+  const [link, setLink] = useState<MessengerLink | null>(null)
+  const [created, setCreated] = useState<MessengerLinkCreate | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  async function refresh() {
+    setLoading(true); setError('')
+    try {
+      const active = (await api.messengerLinks()).find(item => item.provider === 'telegram') ?? null
+      setLink(active)
+      if (active) setCreated(null)
+    } catch (cause) { setError(errorMessage(cause)) }
+    finally { setLoading(false) }
+  }
+  useEffect(() => { void refresh() }, [])
+  async function connect() {
+    setLoading(true); setError('')
+    try { setCreated(await api.createTelegramLink(session.csrf_token)); setLink(null) }
+    catch (cause) { setError(errorMessage(cause)) }
+    finally { setLoading(false) }
+  }
+  async function disconnect() {
+    setLoading(true); setError('')
+    try { await api.revokeTelegramLink(session.csrf_token); setLink(null); setCreated(null) }
+    catch (cause) { setError(errorMessage(cause)) }
+    finally { setLoading(false) }
+  }
+  return <section className="step-content settings-screen">
+    <div className="step-heading"><h1>Настройки</h1><p>Подключение рабочих сервисов</p></div>
+    <section className="panel telegram-linking">
+    <div><h2>Telegram</h2><p>{link ? 'Подключён' : 'Подключите бота к учётной записи'}</p></div>
+    {error && <ErrorBox text={error} />}
+    {loading && <p>Загрузка…</p>}
+    {!loading && link && <><p>{link.username ? `@${link.username}` : link.display_name || 'Подключённый аккаунт'}</p><button className="outline-button" onClick={disconnect}>Отключить</button></>}
+    {!loading && !link && !created && <button className="primary-button" onClick={connect}>Подключить Telegram</button>}
+    {!loading && created && <><p>Откройте ссылку до {formatDateTime(created.expires_at)}.</p><a className="primary-button telegram-link" href={created.deep_link}>Открыть Telegram</a><button className="outline-button" onClick={refresh}>Проверить статус</button><button className="outline-button" onClick={connect}>Создать новую ссылку</button></>}
+    </section>
+  </section>
 }
 
 function ResultCard({ title, result, onBack }: { title: string; result: DomofonOperationResult; onBack: () => void }) {
@@ -529,15 +572,18 @@ function AppShell({ session, onLogout }: { session: Session; onLogout: () => voi
     <main className="app-page with-navigation">
       <header className="app-header">
         <div><strong>ТехПортал</strong><span>{session.user.first_name || session.user.email}</span></div>
-        <button className="logout-button" onClick={onLogout}>Выйти</button>
+        <div className="header-actions"><button className="logout-button" onClick={onLogout}>Выйти</button></div>
       </header>
-      {tab === 'domofon' && domofonAllowed
+      {tab === 'settings'
+        ? <Settings session={session} />
+        : tab === 'domofon' && domofonAllowed
         ? <Domofon session={session} />
         : <Tickets key={tab === 'domofon' ? 'today' : tab} day={tab === 'domofon' ? 'today' : tab} session={session} />}
       <nav className="bottom-nav" aria-label="Основные разделы">
         <button className={tab === 'today' ? 'active' : ''} onClick={() => setTab('today')}><span>●</span>Сегодня</button>
         <button className={tab === 'tomorrow' ? 'active' : ''} onClick={() => setTab('tomorrow')}><span>◐</span>Завтра</button>
         {domofonAllowed && <button className={tab === 'domofon' ? 'active' : ''} onClick={() => setTab('domofon')}><span>⌂</span>Домофон</button>}
+        <button className={tab === 'settings' ? 'active' : ''} onClick={() => setTab('settings')}><span>⚙</span>Настройки</button>
       </nav>
     </main>
   )

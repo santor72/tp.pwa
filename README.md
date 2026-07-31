@@ -4,6 +4,9 @@ PWA для разъездных специалистов. Текущая вер�
 ТехПортал, собственные Redis-сессии, экраны заявок «Сегодня» и «Завтра»,
 структурированные аудит-логи и рабочие сценарии раздела «Домофоны» через ESB.
 
+Инструкция для специалистов: [`docs/user-guide.md`](docs/user-guide.md) или
+[`docs/user-guide.html`](docs/user-guide.html).
+
 Документация реализации заявок «Сегодня» и «Завтра»:
 [`docs/tickets.md`](docs/tickets.md).
 
@@ -14,7 +17,10 @@ PWA для разъездных специалистов. Текущая вер�
    получает учётные данные пользователя из формы входа. Для заявок обязательны
    `TP_BASE_URL` (полный базовый путь API, например `/api/ext`) и
    `TP_BASE_TOKEN`. Для Домофонов обязательны `ESB_BASE_URL` и
-   `ESB_BASE_TOKEN`.
+   `ESB_BASE_TOKEN`. Для Telegram обязательны `TELEGRAM_BOT_TOKEN`,
+   `TELEGRAM_BOT_USERNAME`, `TG_ACCESS_GROUPS` и `HTTPS_PROXY`. Long polling
+   бота не запускается без `HTTPS_PROXY`; он применяется ко всем обращениям к
+   Telegram API.
 2. Запустите контейнеры:
 
    ```bash
@@ -60,7 +66,10 @@ curl http://127.0.0.1:8081/health/ready
 
 - `frontend` — Nginx со статической PWA и reverse proxy `/api`;
 - `api` — FastAPI;
-- `redis` — DB 0 для сессий, DB 1 для кэша;
+- `telegram-bot` — единственный aiogram long-polling процесс без публичного порта;
+- `postgres` — постоянные пользователи, привязки мессенджеров и одноразовые ссылки;
+- `migrate` — одноразово выполняет Alembic-миграции до запуска API и бота;
+- `redis` — DB 0 для сессий, DB 1 для кэша, DB 2 для Telegram FSM/access;
 - `vector` — читает Docker logs и выводит JSON в console sink.
 
 ## API
@@ -74,6 +83,9 @@ curl http://127.0.0.1:8081/health/ready
 - `POST /api/domofon/connect`
 - `GET /api/domofon/addresses`
 - `POST /api/domofon/create`
+- `GET /api/messenger-links`
+- `POST /api/messenger-links/telegram`
+- `DELETE /api/messenger-links/telegram`
 
 Backend использует:
 
@@ -116,3 +128,19 @@ docker run --rm -v "$PWD/backend:/app" -w /app techportal-api \
 docker build --target build -f frontend/Dockerfile -t techportal-frontend-test .
 docker run --rm techportal-frontend-test pnpm test
 ```
+
+## Telegram runbook
+
+- При ротации `TELEGRAM_BOT_TOKEN` замените значение в `.env` и выполните
+  `docker compose up -d --force-recreate telegram-bot`. Токен не должен
+  попадать в compose override, image или логи.
+- При изменении `TG_ACCESS_GROUPS` добавьте бота в новые группы с правами
+  администратора, обновите `.env` и перезапустите только `telegram-bot`.
+  Ключ кэша содержит хэш списка групп, поэтому прежние access-решения не
+  используются.
+- Для отзыва связи специалист использует «Отключить» в PWA. Это немедленно
+  блокирует следующий Telegram update; состояние FSM/access cache можно
+  безопасно очистить вместе с Redis DB 2.
+- Для отката миграции сначала остановите API и bot, затем выполните
+  `docker compose run --rm migrate alembic -c alembic.ini downgrade -1`.
+  Перед откатом production-БД создайте резервную копию.

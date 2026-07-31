@@ -1,4 +1,18 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-techportal}
+      POSTGRES_USER: ${POSTGRES_USER:-techportal}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   redis:
     image: redis:7.4-alpine
     logging:
@@ -26,23 +40,69 @@ services:
         fluentd-address: "127.0.0.1:24224"
         fluentd-async: "true"
         tag: "tppwa.api"
-    env_file: .env
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://techportal:change-me@postgres:5432/techportal}
+      TP_BASE_URL: ${TP_BASE_URL:-https://tp.point.online/api/ext}
+      TP_BASE_TOKEN: ${TP_BASE_TOKEN:-}
+      TP_AUTH_TIMEOUT_SECONDS: ${TP_AUTH_TIMEOUT_SECONDS:-20}
+      TP_API_TIMEOUT_SECONDS: ${TP_API_TIMEOUT_SECONDS:-20}
+      TP_USERS_CACHE_TTL_SECONDS: ${TP_USERS_CACHE_TTL_SECONDS:-300}
       SESSION_COOKIE_SECURE: "false"
       ALLOWED_ORIGINS: http://localhost:8081,http://127.0.0.1:8081
       ESB_BASE_URL: ${ESB_BASE_URL:-}
       ESB_BASE_TOKEN: ${ESB_BASE_TOKEN:-}
       SESSION_ABSOLUTE_TTL_SECONDS: ${SESSION_TTL_SECONDS:-43200}
+      SESSION_IDLE_TTL_SECONDS: ${SESSION_IDLE_TTL_SECONDS:-28800}
+      TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-}
     depends_on:
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready')"]
       interval: 10s
       timeout: 5s
       retries: 5
+
+  migrate:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: ["alembic", "-c", "alembic.ini", "upgrade", "head"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://techportal:change-me@postgres:5432/techportal}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  telegram-bot:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: ["python", "-m", "app.telegram_bot"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://techportal:change-me@postgres:5432/techportal}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_BOT_DB: ${REDIS_BOT_DB:-2}
+      TP_BASE_URL: ${TP_BASE_URL:-https://tp.point.online/api/ext}
+      TP_BASE_TOKEN: ${TP_BASE_TOKEN:-}
+      TP_API_TIMEOUT_SECONDS: ${TP_API_TIMEOUT_SECONDS:-20}
+      TP_USERS_CACHE_TTL_SECONDS: ${TP_USERS_CACHE_TTL_SECONDS:-300}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TG_ACCESS_GROUPS: ${TG_ACCESS_GROUPS:-}
+      TG_ACCESS_CACHE_TTL_SECONDS: ${TG_ACCESS_CACHE_TTL_SECONDS:-300}
+      TG_LINK_TOKEN_TTL_SECONDS: ${TG_LINK_TOKEN_TTL_SECONDS:-600}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+    depends_on:
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
 
   frontend:
     build:
@@ -71,3 +131,4 @@ services:
 
 volumes:
   redis-data:
+  postgres-data:

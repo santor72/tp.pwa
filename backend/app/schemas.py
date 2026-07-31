@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -40,6 +41,7 @@ class SessionData(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     user: UserProfile
+    internal_user_id: UUID | None = None
     csrf_token: str
     created_at: datetime
     absolute_expires_at: datetime
@@ -150,3 +152,16 @@ class TicketResponse(BaseModel):
 class TicketCompletionRequest(BaseModel):
     completed: bool
     day: Literal["today", "tomorrow"]
+
+
+class MessengerLinkResponse(BaseModel):
+    provider: Literal["telegram"]
+    linked_at: datetime
+    username: str | None = None
+    display_name: str | None = None
+
+
+class MessengerLinkCreateResponse(BaseModel):
+    provider: Literal["telegram"]
+    deep_link: str
+    expires_at: datetime

@@ -169,6 +169,29 @@ describe('Домофоны', () => {
   })
 })
 
+describe('Привязка Telegram', () => {
+  it('создаёт deep-link из PWA', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input)
+      if (path === '/api/auth/session') return json(session)
+      if (path === '/api/tickets/today') return json([])
+      if (path === '/api/messenger-links') return json([])
+      if (path === '/api/messenger-links/telegram') return json({
+        provider: 'telegram', deep_link: 'https://t.me/example_bot?start=token', expires_at: '2026-07-31T13:00:00Z',
+      })
+      throw new Error(`Неожиданный запрос: ${path}`)
+    }))
+
+    render(<App />)
+    await screen.findByRole('heading', { name: 'Заявки сегодня' })
+    fireEvent.click(screen.getByRole('button', { name: /Настройки/ }))
+    expect(await screen.findByRole('heading', { name: 'Настройки' })).toBeTruthy()
+    expect(await screen.findByRole('button', { name: 'Подключить Telegram' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Подключить Telegram' }))
+    expect((await screen.findByRole('link', { name: 'Открыть Telegram' })).getAttribute('href')).toBe('https://t.me/example_bot?start=token')
+  })
+})
+
 describe('Заявки', () => {
   it('показывает карточку и открывает подробности коротким нажатием', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {

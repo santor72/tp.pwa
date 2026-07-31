@@ -4,6 +4,7 @@ import logging
 from fastapi import Depends, Request
 
 from app.config import Settings, get_settings
+from app.actors import Actor
 from app.errors import CsrfError, OriginError, SessionExpiredError
 from app.logging import audit, stable_hash
 
@@ -48,3 +49,14 @@ async def require_csrf(
     if not secrets.compare_digest(supplied, session_pair[1].csrf_token):
         raise CsrfError()
     return session_pair
+
+
+async def actor_from_session(request: Request, session: SessionData) -> Actor:
+    internal_user_id = session.internal_user_id
+    if internal_user_id is not None:
+        return Actor(user_id=internal_user_id, techportal_user_id=str(session.user.id), channel="pwa")
+    user_id = await request.app.state.messenger_links.user_id_for_techportal_user(session.user.id)
+    if user_id is None:
+        from app.errors import ApiError
+        raise ApiError(503, "USER_STORAGE_UNAVAILABLE", "Не удалось найти пользователя")
+    return Actor(user_id=user_id, techportal_user_id=str(session.user.id), channel="pwa")

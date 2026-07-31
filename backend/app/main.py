@@ -10,13 +10,9 @@ from fastapi.responses import JSONResponse
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
-from app.auth_provider import TechPortalAuthProvider
-from app.cache_store import CacheStore
 from app.config import Settings, get_settings
-from app.dependencies import get_session_store, require_csrf, require_session, verify_origin
-from app.domofon import DomofonService
+from app.dependencies import actor_from_session, get_session_store, require_csrf, require_session, verify_origin
 from app.errors import ApiError, SessionExpiredError
-from app.esb_client import EsbClient
 from app.logging import audit, configure_logging, request_id_ctx, stable_hash
 from app.schemas import (
     DomofonAddress,
@@ -30,8 +26,8 @@ from app.schemas import (
     TicketResponse,
 )
 from app.session_store import SessionStore
-from app.techportal_client import TechPortalClient
-from app.tickets import TicketService
+from app.services import create_application_services
+from app.routers.messengers import router as messengers_router
 
 settings = get_settings()
 configure_logging(settings.log_level)
@@ -45,16 +41,19 @@ async def lifespan(app: FastAPI):
     app.state.session_redis = session_redis
     app.state.cache_redis = cache_redis
     app.state.session_store = SessionStore(session_redis, settings)
-    app.state.auth_provider = TechPortalAuthProvider(settings)
-    cache_store = CacheStore(cache_redis)
-    app.state.domofon_service = DomofonService(settings, EsbClient(settings), cache_store)
-    app.state.ticket_service = TicketService(settings, TechPortalClient(settings), cache_store)
+    app.state.services = create_application_services(settings, cache_redis)
+    app.state.auth_provider = app.state.services.auth_provider
+    app.state.domofon_service = app.state.services.domofon_service
+    app.state.ticket_service = app.state.services.ticket_service
+    app.state.messenger_links = app.state.services.messenger_links
     yield
+    await app.state.services.close()
     await session_redis.aclose()
     await cache_redis.aclose()
 
 
 app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
+app.include_router(messengers_router)
 
 
 @app.middleware("http")
@@ -127,6 +126,8 @@ async def health_ready(request: Request) -> dict[str, str]:
     try:
         await request.app.state.session_redis.ping()
         await request.app.state.cache_redis.ping()
+        async with request.app.state.services.engine.connect() as connection:
+            await connection.exec_driver_sql("SELECT 1")
     except RedisError as exc:
         raise ApiError(503, "REDIS_UNAVAILABLE", "Redis недоступен") from exc
     return {"status": "ok"}
@@ -140,7 +141,8 @@ async def login(payload: LoginRequest, response: Response, request: Request) -> 
     except ApiError as exc:
         audit(logger, "auth.login.failed", result="failure", login_hash=stable_hash(payload.email), code=exc.code)
         raise
-    session_id, session = await get_session_store(request).create(user)
+    persistent_user = await request.app.state.messenger_links.upsert_user(user)
+    session_id, session = await get_session_store(request).create(user, persistent_user.id)
     set_session_cookie(response, session_id)
     audit(logger, "auth.login.succeeded", user_id=user.id, result="success", session_hash=stable_hash(session_id))
     return SessionResponse(user=user, csrf_token=session.csrf_token)
@@ -172,13 +174,14 @@ async def tickets_for_day(
     session_pair: tuple[str, object] = Depends(require_session),
 ) -> list[TicketResponse]:
     _, session = session_pair
+    actor = await actor_from_session(request, session)
     try:
-        result = await request.app.state.ticket_service.list_for_day(session.user.id, day)
+        result = await request.app.state.ticket_service.list_for_actor(actor, day)
     except ApiError as exc:
         audit(
             logger,
             "tickets.list.failed",
-            user_id=session.user.id,
+            user_id=str(actor.user_id), channel=actor.channel,
             day=day,
             result="failure",
             code=exc.code,
@@ -187,7 +190,7 @@ async def tickets_for_day(
     audit(
         logger,
         "tickets.list.succeeded",
-        user_id=session.user.id,
+        user_id=str(actor.user_id), channel=actor.channel,
         day=day,
         count=len(result),
         result="success",
@@ -203,9 +206,10 @@ async def set_ticket_completion(
     session_pair: tuple[str, object] = Depends(require_csrf),
 ) -> TicketResponse:
     _, session = session_pair
+    actor = await actor_from_session(request, session)
     try:
-        result = await request.app.state.ticket_service.set_completed(
-            session.user.id,
+        result = await request.app.state.ticket_service.set_completed_for_actor(
+            actor,
             payload.day,
             ticket_id,
             payload.completed,
@@ -214,7 +218,7 @@ async def set_ticket_completion(
         audit(
             logger,
             "tickets.completion.failed",
-            user_id=session.user.id,
+            user_id=str(actor.user_id), channel=actor.channel,
             ticket_id=ticket_id,
             day=payload.day,
             result="failure",
@@ -224,7 +228,7 @@ async def set_ticket_completion(
     audit(
         logger,
         "tickets.completion.changed",
-        user_id=session.user.id,
+        user_id=str(actor.user_id), channel=actor.channel,
         ticket_id=ticket_id,
         day=payload.day,
         completed=payload.completed,

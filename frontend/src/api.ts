@@ -34,6 +34,17 @@ export type Ticket = {
   tags: Record<string, unknown>
   comments: TicketComment[]
 }
+export type MessengerLink = {
+  provider: 'telegram'
+  linked_at: string
+  username: string | null
+  display_name: string | null
+}
+export type MessengerLinkCreate = {
+  provider: 'telegram'
+  deep_link: string
+  expires_at: string
+}
 
 export class ApiError extends Error {
   constructor(public readonly status: number, public readonly code: string, message: string) {
@@ -86,5 +97,12 @@ export const api = {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
     body: JSON.stringify(body),
+  }),
+  messengerLinks: () => request<MessengerLink[]>('/api/messenger-links'),
+  createTelegramLink: (csrfToken: string) => request<MessengerLinkCreate>('/api/messenger-links/telegram', {
+    method: 'POST', headers: { 'X-CSRF-Token': csrfToken },
+  }),
+  revokeTelegramLink: (csrfToken: string) => request<void>('/api/messenger-links/telegram', {
+    method: 'DELETE', headers: { 'X-CSRF-Token': csrfToken },
   }),
 }

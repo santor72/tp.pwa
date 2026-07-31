@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
+from app.actors import Actor
 from app.cache_store import CacheStore
 from app.config import Settings
 from app.errors import TicketNotFoundError
@@ -47,6 +48,9 @@ class TicketService:
         )
         return normalized
 
+    async def list_for_actor(self, actor: Actor, day: Literal["today", "tomorrow"]) -> list[TicketResponse]:
+        return await self.list_for_day(actor.techportal_user_id, day)
+
     async def set_completed(
         self,
         user_id: int | str,
@@ -82,6 +86,15 @@ class TicketService:
         ticket = ticket.model_copy(update=persisted_fields)
         users = await self._user_names()
         return self._normalize(ticket, users)
+
+    async def set_completed_for_actor(
+        self,
+        actor: Actor,
+        day: Literal["today", "tomorrow"],
+        ticket_id: int,
+        completed: bool,
+    ) -> TicketResponse:
+        return await self.set_completed(actor.techportal_user_id, day, ticket_id, completed)
 
     async def _user_names(self) -> dict[str, str]:
         cached = await self._cache.get_json(self.users_cache_key)

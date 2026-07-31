@@ -90,6 +90,11 @@ input:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px #dbeafe; }
 .app-header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: .35rem 0 1rem; }
 .app-header > div { display: grid; }
 .app-header span { color: #64748b; font-size: .8rem; }
+.header-actions { display: flex !important; gap: .5rem; align-items: center; }
+.telegram-linking { margin-bottom: 1rem; display: grid; gap: .75rem; }
+.telegram-linking h2 { margin: 0; }
+.telegram-linking p { margin: 0; color: #475569; }
+.telegram-link { text-decoration: none; text-align: center; }
 .step-content { display: grid; gap: 1rem; }
 .step-heading { padding: .5rem 0; }
 .step-heading h1 { margin: 0; font-size: 1.45rem; line-height: 1.25; }

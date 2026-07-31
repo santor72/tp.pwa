@@ -21,6 +21,15 @@ class Settings(BaseSettings):
     redis_port: int = 6379
     redis_session_db: int = 0
     redis_cache_db: int = 1
+    redis_bot_db: int = 2
+
+    database_url: str = "postgresql+asyncpg://techportal:change-me@postgres:5432/techportal"
+    telegram_bot_token: str = ""
+    telegram_bot_username: str = ""
+    tg_access_groups: str = ""
+    tg_access_cache_ttl_seconds: int = Field(default=300, gt=0)
+    tg_link_token_ttl_seconds: int = Field(default=600, gt=0)
+    https_proxy: str = ""
 
     session_cookie_name: str = "tp_pwa_session"
     session_cookie_secure: bool = True
@@ -51,6 +60,39 @@ class Settings(BaseSettings):
     @property
     def cache_redis_url(self) -> str:
         return f"redis://{self.redis_host}:{self.redis_port}/{self.redis_cache_db}"
+
+    @property
+    def bot_redis_url(self) -> str:
+        return f"redis://{self.redis_host}:{self.redis_port}/{self.redis_bot_db}"
+
+    @property
+    def telegram_access_group_ids(self) -> tuple[int, ...]:
+        values = tuple(item.strip() for item in self.tg_access_groups.split(",") if item.strip())
+        if not values:
+            return ()
+        try:
+            return tuple(int(value) for value in values)
+        except ValueError as exc:
+            raise ValueError("TG_ACCESS_GROUPS должен содержать числовые chat ID") from exc
+
+    @field_validator("https_proxy")
+    @classmethod
+    def validate_https_proxy(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            return value
+        parsed = urlsplit(value)
+        if parsed.scheme not in {"http", "https", "socks4", "socks5"} or not parsed.hostname:
+            raise ValueError("HTTPS_PROXY должен быть URL прокси")
+        return value
+
+    @field_validator("telegram_bot_username")
+    @classmethod
+    def validate_telegram_bot_username(cls, value: str) -> str:
+        value = value.strip().removeprefix("@")
+        if value and not value.replace("_", "").isalnum():
+            raise ValueError("TELEGRAM_BOT_USERNAME должен быть username бота без @")
+        return value
 
     @property
     def tp_origin_url(self) -> str:
