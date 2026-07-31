@@ -4,7 +4,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from '../src/App'
 
 const session = {
-  user: { id: 3, email: 'user@example.test', first_name: 'Иван', status: 'active' },
+  user: {
+    id: 3,
+    email: 'user@example.test',
+    first_name: 'Иван',
+    status: 'active',
+    user_permissions: {
+      client: { create: true },
+      tickets: { all: true, execution: true },
+    },
+  },
   csrf_token: 'csrf-test',
 }
 
@@ -45,6 +54,28 @@ afterEach(() => {
 })
 
 describe('Домофоны', () => {
+  it('скрывает раздел без разрешения client.create', async () => {
+    const restrictedSession = {
+      ...session,
+      user: {
+        ...session.user,
+        user_permissions: { client: { create: false } },
+      },
+    }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input)
+      if (path === '/api/auth/session') return json(restrictedSession)
+      if (path === '/api/tickets/today') return json([])
+      throw new Error(`Неожиданный запрос: ${path}`)
+    }))
+
+    render(<App />)
+
+    await screen.findByRole('heading', { name: 'Заявки сегодня' })
+    expect(screen.queryByRole('button', { name: /Домофон/ })).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Домофоны' })).toBeNull()
+  })
+
   it('проходит пошаговое создание пользователя и отправляет все поля', async () => {
     let createRequest: RequestInit | undefined
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

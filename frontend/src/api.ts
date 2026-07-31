@@ -3,6 +3,7 @@ export type UserProfile = {
   email: string
   first_name: string | null
   status: string | null
+  user_permissions: Record<string, unknown>
 }
 
 export type Session = { user: UserProfile; csrf_token: string }

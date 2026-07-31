@@ -44,11 +44,14 @@ class TechPortalAuthProvider:
 
         try:
             payload: dict[str, Any] = response.json()
+            properties = payload.get("properties")
+            permissions = properties.get("permissions") if isinstance(properties, dict) else {}
             return UserProfile(
                 id=payload["id"],
                 email=payload["email"],
                 first_name=payload.get("firstName"),
                 status=payload.get("status"),
+                user_permissions=permissions if isinstance(permissions, dict) else {},
             )
         except (KeyError, TypeError, ValueError) as exc:
             logger.error("Некорректный профиль ТехПортала", extra={"event": "auth.provider.invalid_profile", "fields": {}})

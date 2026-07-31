@@ -26,6 +26,16 @@ function errorMessage(error: unknown): string {
   return error instanceof ApiError ? error.message : 'Не удалось связаться с сервером'
 }
 
+function canOpenDomofon(session: Session): boolean {
+  const clientPermissions = session.user.user_permissions.client
+  return (
+    typeof clientPermissions === 'object'
+    && clientPermissions !== null
+    && !Array.isArray(clientPermissions)
+    && (clientPermissions as Record<string, unknown>).create === true
+  )
+}
+
 function BackIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg>
 }
@@ -514,17 +524,20 @@ function Tickets({ day, session }: { day: TicketDay; session: Session }) {
 
 function AppShell({ session, onLogout }: { session: Session; onLogout: () => void }) {
   const [tab, setTab] = useState<AppTab>('today')
+  const domofonAllowed = canOpenDomofon(session)
   return (
     <main className="app-page with-navigation">
       <header className="app-header">
         <div><strong>ТехПортал</strong><span>{session.user.first_name || session.user.email}</span></div>
         <button className="logout-button" onClick={onLogout}>Выйти</button>
       </header>
-      {tab === 'domofon' ? <Domofon session={session} /> : <Tickets key={tab} day={tab} session={session} />}
+      {tab === 'domofon' && domofonAllowed
+        ? <Domofon session={session} />
+        : <Tickets key={tab === 'domofon' ? 'today' : tab} day={tab === 'domofon' ? 'today' : tab} session={session} />}
       <nav className="bottom-nav" aria-label="Основные разделы">
         <button className={tab === 'today' ? 'active' : ''} onClick={() => setTab('today')}><span>●</span>Сегодня</button>
         <button className={tab === 'tomorrow' ? 'active' : ''} onClick={() => setTab('tomorrow')}><span>◐</span>Завтра</button>
-        <button className={tab === 'domofon' ? 'active' : ''} onClick={() => setTab('domofon')}><span>⌂</span>Домофон</button>
+        {domofonAllowed && <button className={tab === 'domofon' ? 'active' : ''} onClick={() => setTab('domofon')}><span>⌂</span>Домофон</button>}
       </nav>
     </main>
   )

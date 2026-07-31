@@ -13,7 +13,16 @@ async def test_session_is_created_and_read() -> None:
     redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
     settings = Settings(session_absolute_ttl_seconds=60, session_idle_ttl_seconds=30)
     store = SessionStore(redis, settings)
-    user = UserProfile(id=7, email="tech@example.test", first_name="Техник", status="user")
+    user = UserProfile(
+        id=7,
+        email="tech@example.test",
+        first_name="Техник",
+        status="user",
+        user_permissions={
+            "map": {"lines": "w", "clients": True},
+            "tickets": {"all": True, "execution": True},
+        },
+    )
 
     session_id, created = await store.create(user)
     loaded = await store.get(session_id)

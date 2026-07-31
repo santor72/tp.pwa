@@ -22,6 +22,7 @@ class UserProfile(BaseModel):
     email: str
     first_name: str | None = None
     status: str | None = None
+    user_permissions: dict[str, Any] = Field(default_factory=dict)
 
 
 class SessionResponse(BaseModel):
