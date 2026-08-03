@@ -580,10 +580,10 @@ function AppShell({ session, onLogout }: { session: Session; onLogout: () => voi
         ? <Domofon session={session} />
         : <Tickets key={tab === 'domofon' ? 'today' : tab} day={tab === 'domofon' ? 'today' : tab} session={session} />}
       <nav className="bottom-nav" aria-label="Основные разделы">
-        <button className={tab === 'today' ? 'active' : ''} onClick={() => setTab('today')}><span>●</span>Сегодня</button>
-        <button className={tab === 'tomorrow' ? 'active' : ''} onClick={() => setTab('tomorrow')}><span>◐</span>Завтра</button>
-        {domofonAllowed && <button className={tab === 'domofon' ? 'active' : ''} onClick={() => setTab('domofon')}><span>⌂</span>Домофон</button>}
-        <button className={tab === 'settings' ? 'active' : ''} onClick={() => setTab('settings')}><span>⚙</span>Настройки</button>
+        <button className={tab === 'today' ? 'active' : ''} onClick={() => setTab('today')} aria-label="Сегодня" title="Сегодня"><span aria-hidden="true">●</span></button>
+        <button className={tab === 'tomorrow' ? 'active' : ''} onClick={() => setTab('tomorrow')} aria-label="Завтра" title="Завтра"><span aria-hidden="true">◐</span></button>
+        {domofonAllowed && <button className={tab === 'domofon' ? 'active' : ''} onClick={() => setTab('domofon')} aria-label="Домофон" title="Домофон"><span aria-hidden="true">⌂</span></button>}
+        <button className={tab === 'settings' ? 'active' : ''} onClick={() => setTab('settings')} aria-label="Настройки" title="Настройки"><span aria-hidden="true">⚙</span></button>
       </nav>
     </main>
   )

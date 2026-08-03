@@ -129,7 +129,7 @@ input:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px #dbeafe; }
   bottom: 0;
   width: min(100%, 44rem);
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(3.25rem, 1fr));
   padding: .45rem max(.55rem, env(safe-area-inset-left)) calc(.45rem + env(safe-area-inset-bottom));
   transform: translateX(-50%);
   background: #ffffffee;
@@ -139,17 +139,16 @@ input:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px #dbeafe; }
 }
 .bottom-nav button {
   display: grid;
-  justify-items: center;
-  gap: .15rem;
+  place-items: center;
+  min-width: 3.25rem;
+  min-height: 3.25rem;
   padding: .42rem .2rem;
   border: 0;
   border-radius: .75rem;
   color: #64748b;
   background: transparent;
-  font-size: .72rem;
-  font-weight: 800;
 }
-.bottom-nav button span { font-size: 1rem; line-height: 1; }
+.bottom-nav button span { font-size: 1.35rem; line-height: 1; }
 .bottom-nav button.active { color: #1d4ed8; background: #eff6ff; }
 
 .tickets-screen, .ticket-details { display: grid; gap: 1rem; }
