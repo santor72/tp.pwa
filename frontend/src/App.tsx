@@ -574,6 +574,7 @@ function AppShell({ session, onLogout }: { session: Session; onLogout: () => voi
   const [tab, setTab] = useState<AppTab>('today')
   const domofonAllowed = session.capabilities.domofon
   const messengerSettingsAllowed = session.capabilities.messenger_settings
+  const ticketDay: TicketDay = tab === 'today' || tab === 'tomorrow' ? tab : 'today'
   return (
     <main className="app-page with-navigation">
       <header className="app-header">
@@ -584,7 +585,7 @@ function AppShell({ session, onLogout }: { session: Session; onLogout: () => voi
         ? <Settings session={session} />
         : tab === 'domofon' && domofonAllowed
         ? <Domofon session={session} />
-        : <Tickets key={tab === 'domofon' ? 'today' : tab} day={tab === 'domofon' ? 'today' : tab} session={session} />}
+        : <Tickets key={ticketDay} day={ticketDay} session={session} />}
       <nav className="bottom-nav" aria-label="Основные разделы">
         <button className={tab === 'today' ? 'active' : ''} onClick={() => setTab('today')} aria-label="Сегодня" title="Сегодня"><span aria-hidden="true">●</span></button>
         <button className={tab === 'tomorrow' ? 'active' : ''} onClick={() => setTab('tomorrow')} aria-label="Завтра" title="Завтра"><span aria-hidden="true">◐</span></button>
