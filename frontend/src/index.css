@@ -159,6 +159,33 @@ input:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px #dbeafe; }
   gap: 1rem;
   padding: .35rem 0;
 }
+
+.tickets-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.tickets-scope {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--muted);
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+
+.tickets-scope input {
+  width: 1rem;
+  height: 1rem;
+}
+
+.ticket-masters {
+  margin: 0.1rem 0 0;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  line-height: 1.35;
+}
 .tickets-heading h1 { margin: 0; font-size: 1.45rem; }
 .tickets-heading p { margin: .22rem 0 0; color: #64748b; font-size: .88rem; }
 .refresh-button {

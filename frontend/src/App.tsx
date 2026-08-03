@@ -28,16 +28,6 @@ function errorMessage(error: unknown): string {
   return error instanceof ApiError ? error.message : 'Не удалось связаться с сервером'
 }
 
-function canOpenDomofon(session: Session): boolean {
-  const clientPermissions = session.user.user_permissions.client
-  return (
-    typeof clientPermissions === 'object'
-    && clientPermissions !== null
-    && !Array.isArray(clientPermissions)
-    && (clientPermissions as Record<string, unknown>).create === true
-  )
-}
-
 function BackIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg>
 }
@@ -338,11 +328,15 @@ function ticketDateLabel(day: TicketDay): string {
 function TicketCard({
   ticket,
   busy,
+  editable,
+  showMasters,
   onOpen,
   onToggle,
 }: {
   ticket: Ticket
   busy: boolean
+  editable: boolean
+  showMasters: boolean
   onOpen: () => void
   onToggle: () => void
 }) {
@@ -357,7 +351,7 @@ function TicketCard({
   }
 
   function startPress(event: ReactPointerEvent<HTMLElement>) {
-    if (busy || (event.target as HTMLElement).closest('a')) return
+    if (busy || !editable || (event.target as HTMLElement).closest('a')) return
     longPressTriggered.current = false
     setPressed(true)
     timer.current = setTimeout(() => {
@@ -413,7 +407,8 @@ function TicketCard({
       {ticket.client_phone
         ? <a href={`tel:${ticket.client_phone}`} onClick={event => event.stopPropagation()}>{ticket.client_phone}</a>
         : <span className="ticket-muted">Телефон не указан</span>}
-      <small className="long-press-hint">Удерживайте карточку, чтобы изменить статус</small>
+      {showMasters && ticket.assigned_masters.length > 0 && <p className="ticket-masters">Назначены: {ticket.assigned_masters.join(', ')}</p>}
+      {editable && <small className="long-press-hint">Удерживайте карточку, чтобы изменить статус</small>}
     </article>
   )
 }
@@ -428,11 +423,13 @@ function CommentValue({ value }: { value: string }) {
 function TicketDetails({
   ticket,
   busy,
+  editable,
   onBack,
   onToggle,
 }: {
   ticket: Ticket
   busy: boolean
+  editable: boolean
   onBack: () => void
   onToggle: () => void
 }) {
@@ -456,9 +453,9 @@ function TicketDetails({
           <h2>Описание</h2>
           <p>{ticket.description || 'Описание отсутствует'}</p>
         </div>
-        <button className="primary-button" disabled={busy} onClick={onToggle}>
+        {editable && <button className="primary-button" disabled={busy} onClick={onToggle}>
           {busy ? 'Сохранение…' : ticket.completed ? 'Вернуть в работу' : 'Отметить исполненной'}
-        </button>
+        </button>}
       </div>
       <section className="comments-section">
         <h2>Комментарии <span>{ticket.comments.length}</span></h2>
@@ -483,12 +480,14 @@ function Tickets({ day, session }: { day: TicketDay; session: Session }) {
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId] = useState<number | null>(null)
   const [error, setError] = useState('')
+  const [scope, setScope] = useState<'assigned' | 'all'>('assigned')
+  const canViewAll = session.capabilities.all_tickets
 
   async function load() {
     setLoading(true)
     setError('')
     try {
-      setTickets(await api.tickets(day))
+      setTickets(await api.tickets(day, scope))
     } catch (cause) {
       setError(errorMessage(cause))
     } finally {
@@ -500,12 +499,12 @@ function Tickets({ day, session }: { day: TicketDay; session: Session }) {
     let active = true
     setLoading(true)
     setError('')
-    api.tickets(day)
+    api.tickets(day, scope)
       .then(value => { if (active) setTickets(value) })
       .catch(cause => { if (active) setError(errorMessage(cause)) })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [day])
+  }, [day, scope])
 
   async function toggle(ticket: Ticket) {
     if (busyId !== null) return
@@ -529,6 +528,7 @@ function Tickets({ day, session }: { day: TicketDay; session: Session }) {
         <TicketDetails
           ticket={selected}
           busy={busyId === selected.id}
+          editable={selected.can_change_completion !== false}
           onBack={() => { setSelectedId(null); setError('') }}
           onToggle={() => toggle(selected)}
         />
@@ -543,7 +543,10 @@ function Tickets({ day, session }: { day: TicketDay; session: Session }) {
           <h1>{day === 'today' ? 'Заявки сегодня' : 'Заявки завтра'}</h1>
           <p>{ticketDateLabel(day)}</p>
         </div>
-        <button className="refresh-button" onClick={load} disabled={loading} aria-label="Обновить заявки">↻</button>
+        <div className="tickets-actions">
+          {canViewAll && <label className="tickets-scope"><input type="checkbox" checked={scope === 'all'} onChange={event => { setSelectedId(null); setScope(event.target.checked ? 'all' : 'assigned') }} />Все заявки</label>}
+          <button className="refresh-button" onClick={load} disabled={loading} aria-label="Обновить заявки">↻</button>
+        </div>
       </div>
       {error && <ErrorBox text={error} />}
       {loading
@@ -556,6 +559,8 @@ function Tickets({ day, session }: { day: TicketDay; session: Session }) {
                   key={ticket.id}
                   ticket={ticket}
                   busy={busyId === ticket.id}
+                  editable={ticket.can_change_completion !== false}
+                  showMasters={scope === 'all'}
                   onOpen={() => setSelectedId(ticket.id)}
                   onToggle={() => toggle(ticket)}
                 />
@@ -567,14 +572,15 @@ function Tickets({ day, session }: { day: TicketDay; session: Session }) {
 
 function AppShell({ session, onLogout }: { session: Session; onLogout: () => void }) {
   const [tab, setTab] = useState<AppTab>('today')
-  const domofonAllowed = canOpenDomofon(session)
+  const domofonAllowed = session.capabilities.domofon
+  const messengerSettingsAllowed = session.capabilities.messenger_settings
   return (
     <main className="app-page with-navigation">
       <header className="app-header">
         <div><strong>ТехПортал</strong><span>{session.user.first_name || session.user.email}</span></div>
         <div className="header-actions"><button className="logout-button" onClick={onLogout}>Выйти</button></div>
       </header>
-      {tab === 'settings'
+      {tab === 'settings' && messengerSettingsAllowed
         ? <Settings session={session} />
         : tab === 'domofon' && domofonAllowed
         ? <Domofon session={session} />
@@ -583,7 +589,7 @@ function AppShell({ session, onLogout }: { session: Session; onLogout: () => voi
         <button className={tab === 'today' ? 'active' : ''} onClick={() => setTab('today')} aria-label="Сегодня" title="Сегодня"><span aria-hidden="true">●</span></button>
         <button className={tab === 'tomorrow' ? 'active' : ''} onClick={() => setTab('tomorrow')} aria-label="Завтра" title="Завтра"><span aria-hidden="true">◐</span></button>
         {domofonAllowed && <button className={tab === 'domofon' ? 'active' : ''} onClick={() => setTab('domofon')} aria-label="Домофон" title="Домофон"><span aria-hidden="true">⌂</span></button>}
-        <button className={tab === 'settings' ? 'active' : ''} onClick={() => setTab('settings')} aria-label="Настройки" title="Настройки"><span aria-hidden="true">⚙</span></button>
+        {messengerSettingsAllowed && <button className={tab === 'settings' ? 'active' : ''} onClick={() => setTab('settings')} aria-label="Настройки" title="Настройки"><span aria-hidden="true">⚙</span></button>}
       </nav>
     </main>
   )

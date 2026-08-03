@@ -48,8 +48,26 @@ class TicketService:
         )
         return normalized
 
-    async def list_for_actor(self, actor: Actor, day: Literal["today", "tomorrow"]) -> list[TicketResponse]:
-        return await self.list_for_day(actor.techportal_user_id, day)
+    async def list_for_actor(
+        self,
+        actor: Actor,
+        day: Literal["today", "tomorrow"],
+        scope: Literal["assigned", "all"] = "assigned",
+    ) -> list[TicketResponse]:
+        if scope == "assigned":
+            return await self.list_for_day(actor.techportal_user_id, day)
+        offset = 0 if day == "today" else 1
+        target = datetime.now(MOSCOW).date() + timedelta(days=offset)
+        tickets = await self._client.tickets(None, target.strftime("%d.%m.%Y"))
+        users = await self._user_names()
+        normalized = [self._normalize(ticket, users).model_copy(update={"can_change_completion": False}) for ticket in tickets]
+        normalized.sort(
+            key=lambda ticket: (
+                ticket.scheduled_at is None,
+                ticket.scheduled_at or datetime.max.replace(tzinfo=UTC),
+            )
+        )
+        return normalized
 
     async def set_completed(
         self,
@@ -138,6 +156,7 @@ class TicketService:
             completed=COMPLETED_TAG in ticket.tags,
             tags=ticket.tags,
             comments=comments,
+            assigned_masters=[users.get(str(master_id), f"Пользователь #{master_id}") for master_id in ticket.masters],
         )
 
     @staticmethod

@@ -56,6 +56,7 @@ services:
       SESSION_ABSOLUTE_TTL_SECONDS: ${SESSION_TTL_SECONDS:-43200}
       SESSION_IDLE_TTL_SECONDS: ${SESSION_IDLE_TTL_SECONDS:-28800}
       TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-}
+      MESSENGER_SHOW: ${MESSENGER_SHOW:-false}
     depends_on:
       redis:
         condition: service_healthy

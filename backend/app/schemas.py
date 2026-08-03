@@ -2,7 +2,9 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
+
+from app.roles import UserRole, role_for_status
 
 
 class LoginRequest(BaseModel):
@@ -25,10 +27,22 @@ class UserProfile(BaseModel):
     status: str | None = None
     user_permissions: dict[str, Any] = Field(default_factory=dict)
 
+    @computed_field
+    @property
+    def role(self) -> UserRole:
+        return role_for_status(self.status)
+
+
+class Capabilities(BaseModel):
+    domofon: bool = False
+    messenger_settings: bool = False
+    all_tickets: bool = False
+
 
 class SessionResponse(BaseModel):
     user: UserProfile
     csrf_token: str
+    capabilities: Capabilities = Field(default_factory=Capabilities)
 
 
 class ErrorResponse(BaseModel):
@@ -147,6 +161,8 @@ class TicketResponse(BaseModel):
     completed: bool
     tags: dict[str, Any]
     comments: list[TicketComment]
+    assigned_masters: list[str] = Field(default_factory=list)
+    can_change_completion: bool = True
 
 
 class TicketCompletionRequest(BaseModel):

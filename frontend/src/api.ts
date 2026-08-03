@@ -1,12 +1,16 @@
+export type UserRole = 'admin' | 'manager' | 'user'
+export type Capabilities = { domofon: boolean; messenger_settings: boolean; all_tickets: boolean }
+
 export type UserProfile = {
   id: number | string
   email: string
   first_name: string | null
   status: string | null
+  role: UserRole
   user_permissions: Record<string, unknown>
 }
 
-export type Session = { user: UserProfile; csrf_token: string }
+export type Session = { user: UserProfile; csrf_token: string; capabilities: Capabilities }
 export type DomofonAddress = { locid: number; loctext: string }
 export type DomofonOperationResult = { ok: true; reason: string }
 export type DomofonCreatePayload = {
@@ -33,6 +37,8 @@ export type Ticket = {
   completed: boolean
   tags: Record<string, unknown>
   comments: TicketComment[]
+  assigned_masters: string[]
+  can_change_completion: boolean
 }
 export type MessengerLink = {
   provider: 'telegram'
@@ -80,7 +86,7 @@ export const api = {
     method: 'POST',
     headers: { 'X-CSRF-Token': csrfToken },
   }),
-  tickets: (day: TicketDay) => request<Ticket[]>(`/api/tickets/${day}`),
+  tickets: (day: TicketDay, scope: 'assigned' | 'all' = 'assigned') => request<Ticket[]>(`/api/tickets/${day}${scope === 'all' ? '?scope=all' : ''}`),
   setTicketCompletion: (ticketId: number, day: TicketDay, completed: boolean, csrfToken: string) =>
     request<Ticket>(`/api/tickets/${ticketId}/completion`, {
       method: 'POST',

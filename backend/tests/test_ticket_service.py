@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from typing import Any
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import fakeredis.aioredis
@@ -8,6 +9,7 @@ import pytest
 from app.cache_store import CacheStore
 from app.config import Settings
 from app.errors import TicketNotFoundError
+from app.actors import Actor
 from app.schemas import TechPortalTicket, TechPortalUser
 from app.tickets import TicketService
 
@@ -22,7 +24,7 @@ class FakeTechPortal:
         self.persist_calls: list[tuple[int, dict[str, Any]]] = []
         self.user_calls = 0
 
-    async def tickets(self, user_id: int | str, date: str) -> list[TechPortalTicket]:
+    async def tickets(self, user_id: int | str | None, date: str) -> list[TechPortalTicket]:
         self.ticket_calls.append((user_id, date))
         return self.ticket_result
 
@@ -82,6 +84,7 @@ async def test_list_filters_foreign_tickets_and_normalizes_comments_and_utc() ->
     assert result[0].completed is False
     assert result[0].comments[0].author == "Константин"
     assert result[0].comments[0].text == "Работы согласованы"
+    assert result[0].assigned_masters == ["Пользователь #87"]
     assert result[0].comments[0].created_at is not None
     assert result[0].comments[0].created_at.utcoffset() == timedelta(hours=3)
     assert result[0].scheduled_at is not None
@@ -113,6 +116,19 @@ async def test_list_is_sorted_by_scheduled_time_with_missing_time_last() -> None
     result = await service(client).list_for_day(87, "today")
 
     assert [item.id for item in result] == [1, 2, 3]
+
+
+@pytest.mark.asyncio
+async def test_all_scope_does_not_filter_and_marks_tickets_read_only() -> None:
+    client = FakeTechPortal([ticket(), ticket(99, masters=[112])])
+    actor = Actor(user_id=uuid4(), techportal_user_id="87", channel="pwa")
+
+    result = await service(client).list_for_actor(actor, "today", "all")
+
+    assert [item.id for item in result] == [32412, 99]
+    assert all(not item.can_change_completion for item in result)
+    assert result[1].assigned_masters == ["Пользователь #112"]
+    assert client.ticket_calls[0][0] is None
 
 
 @pytest.mark.asyncio

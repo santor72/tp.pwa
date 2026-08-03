@@ -1,7 +1,7 @@
 from functools import lru_cache
 from urllib.parse import urlsplit
 
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     tg_access_groups: str = ""
     tg_access_cache_ttl_seconds: int = Field(default=300, gt=0)
     tg_link_token_ttl_seconds: int = Field(default=600, gt=0)
+    messenger_show: bool = Field(default=False, validation_alias=AliasChoices("MESSENGER_SHOW", "MESSENDGER_SHOW"))
     https_proxy: str = ""
 
     session_cookie_name: str = "tp_pwa_session"

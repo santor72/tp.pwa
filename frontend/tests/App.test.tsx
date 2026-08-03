@@ -9,12 +9,14 @@ const session = {
     email: 'user@example.test',
     first_name: 'Иван',
     status: 'active',
+    role: 'user',
     user_permissions: {
       client: { create: true },
       tickets: { all: true, execution: true },
     },
   },
   csrf_token: 'csrf-test',
+  capabilities: { domofon: true, messenger_settings: true, all_tickets: false },
 }
 
 const ticket = {
@@ -61,6 +63,7 @@ describe('Домофоны', () => {
         ...session.user,
         user_permissions: { client: { create: false } },
       },
+      capabilities: { ...session.capabilities, domofon: false },
     }
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input)
@@ -166,6 +169,50 @@ describe('Домофоны', () => {
     expect((await screen.findByRole('alert')).textContent).toContain('Пользователь не найден')
     await waitFor(() => expect(screen.queryByText('Операция выполнена')).toBeNull())
     expect(screen.getByRole('heading', { name: 'Домофоны' })).toBeTruthy()
+  })
+})
+
+describe('Capabilities', () => {
+  it('скрывает настройки, когда messenger_settings отключён', async () => {
+    const restrictedSession = { ...session, capabilities: { ...session.capabilities, messenger_settings: false } }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/api/auth/session') return json(restrictedSession)
+      if (String(input) === '/api/tickets/today') return json([])
+      throw new Error(`Неожиданный запрос: ${input}`)
+    }))
+
+    render(<App />)
+
+    await screen.findByRole('heading', { name: 'Заявки сегодня' })
+    expect(screen.queryByRole('button', { name: 'Настройки' })).toBeNull()
+  })
+
+  it('запрашивает общий список только после включения переключателя', async () => {
+    const managerSession = {
+      ...session,
+      user: { ...session.user, role: 'manager' },
+      capabilities: { ...session.capabilities, all_tickets: true },
+    }
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input)
+      if (path === '/api/auth/session') return json(managerSession)
+      if (path === '/api/tickets/today') return json([])
+      if (path === '/api/tickets/today?scope=all') return json([{
+        ...ticket,
+        assigned_masters: ['Иван Иванов', 'Пётр Петров'],
+        can_change_completion: false,
+      }])
+      throw new Error(`Неожиданный запрос: ${path}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<App />)
+
+    await screen.findByRole('heading', { name: 'Заявки сегодня' })
+    fireEvent.click(screen.getByLabelText('Все заявки'))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/tickets/today?scope=all', expect.any(Object)))
+    expect(await screen.findByText('Назначены: Иван Иванов, Пётр Петров')).toBeTruthy()
+    expect(screen.queryByText('Удерживайте карточку, чтобы изменить статус')).toBeNull()
   })
 })
 

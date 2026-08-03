@@ -28,19 +28,21 @@ class TechPortalClient:
         self._settings = settings
         self._transport = transport
 
-    async def tickets(self, user_id: int | str, date: str) -> list[TechPortalTicket]:
+    async def tickets(self, user_id: int | str | None, date: str) -> list[TechPortalTicket]:
+        ticket_filter: dict[str, Any] = {
+            "tags": {},
+            "createdBy": [],
+            "closedFrom": "-",
+            "scheduledTo": date,
+            "scheduledFrom": date,
+        }
+        if user_id is not None:
+            ticket_filter["masterIds"] = [user_id]
         payload = {
             "page": 0,
             "filters": {
                 "and": [
-                    {
-                        "tags": {},
-                        "createdBy": [],
-                        "masterIds": [user_id],
-                        "closedFrom": "-",
-                        "scheduledTo": date,
-                        "scheduledFrom": date,
-                    }
+                    ticket_filter
                 ]
             },
         }

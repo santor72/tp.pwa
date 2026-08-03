@@ -11,9 +11,12 @@ from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
 from app.config import Settings, get_settings
+from app.capabilities import capabilities_for
 from app.dependencies import actor_from_session, get_session_store, require_csrf, require_session, verify_origin
-from app.errors import ApiError, SessionExpiredError
+from app.errors import ApiError, PermissionDeniedError, SessionExpiredError
 from app.logging import audit, configure_logging, request_id_ctx, stable_hash
+from app.permissions import require_permission
+from app.roles import UserRole
 from app.schemas import (
     DomofonAddress,
     DomofonConnectRequest,
@@ -145,13 +148,20 @@ async def login(payload: LoginRequest, response: Response, request: Request) -> 
     session_id, session = await get_session_store(request).create(user, persistent_user.id)
     set_session_cookie(response, session_id)
     audit(logger, "auth.login.succeeded", user_id=user.id, result="success", session_hash=stable_hash(session_id))
-    return SessionResponse(user=user, csrf_token=session.csrf_token)
+    return SessionResponse(user=user, csrf_token=session.csrf_token, capabilities=capabilities_for(user.role, user.user_permissions, settings.messenger_show))
 
 
 @app.get("/api/auth/session", response_model=SessionResponse)
-async def get_session(session_pair: tuple[str, object] = Depends(require_session)) -> SessionResponse:
+async def get_session(
+    session_pair: tuple[str, object] = Depends(require_session),
+    settings: Settings = Depends(get_settings),
+) -> SessionResponse:
     _, session = session_pair
-    return SessionResponse(user=session.user, csrf_token=session.csrf_token)
+    return SessionResponse(
+        user=session.user,
+        csrf_token=session.csrf_token,
+        capabilities=capabilities_for(session.user.role, session.user.user_permissions, settings.messenger_show),
+    )
 
 
 @app.post("/api/auth/logout", status_code=204)
@@ -172,17 +182,21 @@ async def tickets_for_day(
     day: Literal["today", "tomorrow"],
     request: Request,
     session_pair: tuple[str, object] = Depends(require_session),
+    scope: Literal["assigned", "all"] = "assigned",
 ) -> list[TicketResponse]:
     _, session = session_pair
     actor = await actor_from_session(request, session)
+    if scope == "all" and actor.role not in {UserRole.ADMIN, UserRole.MANAGER}:
+        raise PermissionDeniedError()
     try:
-        result = await request.app.state.ticket_service.list_for_actor(actor, day)
+        result = await request.app.state.ticket_service.list_for_actor(actor, day, scope)
     except ApiError as exc:
         audit(
             logger,
             "tickets.list.failed",
             user_id=str(actor.user_id), channel=actor.channel,
             day=day,
+            scope=scope,
             result="failure",
             code=exc.code,
         )
@@ -192,6 +206,7 @@ async def tickets_for_day(
         "tickets.list.succeeded",
         user_id=str(actor.user_id), channel=actor.channel,
         day=day,
+        scope=scope,
         count=len(result),
         result="success",
     )
@@ -244,6 +259,8 @@ async def domofon_connect(
     session_pair: tuple[str, object] = Depends(require_csrf),
 ) -> DomofonOperationResponse:
     _, session = session_pair
+    actor = await actor_from_session(request, session)
+    require_permission(actor, "client", "create")
     try:
         result = await request.app.state.domofon_service.connect(payload)
     except ApiError as exc:
@@ -259,6 +276,8 @@ async def domofon_addresses(
     session_pair: tuple[str, object] = Depends(require_session),
 ) -> list[DomofonAddress]:
     _, session = session_pair
+    actor = await actor_from_session(request, session)
+    require_permission(actor, "client", "create")
     try:
         result = await request.app.state.domofon_service.addresses()
     except ApiError as exc:
@@ -275,6 +294,8 @@ async def domofon_create(
     session_pair: tuple[str, object] = Depends(require_csrf),
 ) -> DomofonOperationResponse:
     _, session = session_pair
+    actor = await actor_from_session(request, session)
+    require_permission(actor, "client", "create")
     try:
         result = await request.app.state.domofon_service.create(payload)
     except ApiError as exc:

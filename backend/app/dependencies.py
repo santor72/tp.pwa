@@ -54,9 +54,9 @@ async def require_csrf(
 async def actor_from_session(request: Request, session: SessionData) -> Actor:
     internal_user_id = session.internal_user_id
     if internal_user_id is not None:
-        return Actor(user_id=internal_user_id, techportal_user_id=str(session.user.id), channel="pwa")
+        return Actor(user_id=internal_user_id, techportal_user_id=str(session.user.id), channel="pwa", permissions=session.user.user_permissions, role=session.user.role)
     user_id = await request.app.state.messenger_links.user_id_for_techportal_user(session.user.id)
     if user_id is None:
         from app.errors import ApiError
         raise ApiError(503, "USER_STORAGE_UNAVAILABLE", "Не удалось найти пользователя")
-    return Actor(user_id=user_id, techportal_user_id=str(session.user.id), channel="pwa")
+    return Actor(user_id=user_id, techportal_user_id=str(session.user.id), channel="pwa", permissions=session.user.user_permissions, role=session.user.role)

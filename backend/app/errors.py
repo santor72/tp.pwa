@@ -29,6 +29,11 @@ class OriginError(ApiError):
         super().__init__(status.HTTP_403_FORBIDDEN, "ORIGIN_FORBIDDEN", "Недопустимый источник запроса")
 
 
+class PermissionDeniedError(ApiError):
+    def __init__(self) -> None:
+        super().__init__(status.HTTP_403_FORBIDDEN, "PERMISSION_DENIED", "Недостаточно прав для выполнения операции")
+
+
 class ServiceUnavailableError(ApiError):
     def __init__(self, message: str = "Сервис временно недоступен") -> None:
         super().__init__(status.HTTP_503_SERVICE_UNAVAILABLE, "SERVICE_UNAVAILABLE", message)

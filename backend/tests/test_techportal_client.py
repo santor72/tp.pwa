@@ -45,6 +45,16 @@ async def test_ticket_list_uses_bearer_full_base_path_and_page_zero() -> None:
 
 
 @pytest.mark.asyncio
+async def test_all_tickets_omits_master_filter() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert "masterIds" not in payload["filters"]["and"][0]
+        return httpx.Response(200, json=[])
+
+    assert await TechPortalClient(settings(), transport=httpx.MockTransport(handler)).tickets(None, "30.07.2026") == []
+
+
+@pytest.mark.asyncio
 async def test_persist_sends_complete_tags_element() -> None:
     tags = {"Новое подключение": {}, "Работы произведены": {}}
 
