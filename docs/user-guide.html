@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Инструкция для специалиста — ТехПортал</title>
+    <style>
+      :root { color-scheme: light; font-family: Arial, sans-serif; color: #1e293b; background: #f8fafc; }
+      body { max-width: 760px; margin: 0 auto; padding: 32px 20px 48px; line-height: 1.55; }
+      main { padding: 28px; border-radius: 16px; background: #fff; box-shadow: 0 1px 4px #0f172a1a; }
+      h1 { margin-top: 0; color: #0f3d79; }
+      h2 { margin-top: 32px; color: #1d4f91; }
+      a { color: #075cc6; }
+      .pwa-link { display: inline-block; margin: 8px 0; padding: 10px 14px; border-radius: 8px; color: #fff; background: #075cc6; font-weight: 700; text-decoration: none; }
+      .notice { padding: 12px 14px; border-left: 4px solid #eab308; border-radius: 4px; background: #fefce8; }
+      @media print { body { max-width: none; padding: 0; background: #fff; } main { box-shadow: none; } .pwa-link { color: #075cc6; background: none; padding: 0; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Инструкция для специалиста</h1>
+
+      <h2>1. Вход в приложение</h2>
+      <p>Откройте веб-приложение ТехПортала:</p>
+      <p><a class="pwa-link" href="https://pwa.example.com">Открыть ТехПортал PWA</a></p>
+      <ol>
+        <li>Введите логин и пароль от ТехПортала.</li>
+        <li>После входа доступны заявки на сегодня и завтра.</li>
+        <li>При наличии нужного права доступен раздел «Домофон».</li>
+      </ol>
+      <p class="notice">Не передавайте логин, пароль, ссылку на подключение Telegram или код из неё другим людям.</p>
+
+      <h2>2. Подключение Telegram</h2>
+      <ol>
+        <li>В правом верхнем углу PWA нажмите <strong>Telegram</strong>.</li>
+        <li>Нажмите <strong>Подключить Telegram</strong>.</li>
+        <li>Нажмите <strong>Открыть Telegram</strong> в созданной ссылке.</li>
+        <li>В Telegram откроется бот. Нажмите <strong>Start</strong> или отправьте <code>/start</code>.</li>
+        <li>Дождитесь сообщения бота о подключении.</li>
+      </ol>
+      <p>Ссылка одноразовая и действует ограниченное время. Если она истекла или открыта не в том Telegram-аккаунте, вернитесь в PWA и создайте новую.</p>
+      <p>К боту допускаются только участники рабочих Telegram-групп. Если бот не отвечает, убедитесь, что используете разрешённый аккаунт, и обратитесь к руководителю или администратору.</p>
+
+      <h2>3. Заявки в Telegram</h2>
+      <p>После подключения отправьте боту <code>/start</code> без кода. Бот ответит количеством ваших заявок на сегодня. Он показывает только заявки, назначенные на вашу учётную запись ТехПортала.</p>
+
+      <h2>4. Проверка статуса подключения</h2>
+      <p>Вернитесь в PWA, нажмите <strong>Telegram</strong>, затем <strong>Проверить статус</strong>. При успешной привязке будет показан подключённый Telegram-аккаунт.</p>
+
+      <h2>5. Отключение Telegram</h2>
+      <ol>
+        <li>В PWA нажмите <strong>Telegram</strong>.</li>
+        <li>Нажмите <strong>Отключить</strong>.</li>
+      </ol>
+      <p>После отключения бот перестанет показывать ваши заявки. Для повторного подключения создайте новую ссылку в PWA.</p>
+
+      <h2>Если возникла ошибка</h2>
+      <ul>
+        <li>Не удаётся войти в PWA — проверьте логин и пароль ТехПортала.</li>
+        <li>Telegram не подключается — создайте новую ссылку и откройте её в нужном аккаунте.</li>
+        <li>Бот не отвечает — проверьте членство в рабочей группе и отправьте <code>/start</code> ещё раз.</li>
+        <li>Количество заявок не получено — попробуйте позже; при повторении сообщите администратору.</li>
+      </ul>
+    </main>
+  </body>
+</html>
