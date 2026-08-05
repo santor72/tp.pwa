@@ -30,7 +30,6 @@ async def test_ticket_list_uses_bearer_full_base_path_and_page_zero() -> None:
             "tags": {},
             "createdBy": [],
             "masterIds": [87],
-            "closedFrom": "-",
             "scheduledTo": "30.07.2026",
             "scheduledFrom": "30.07.2026",
         }
@@ -52,6 +51,22 @@ async def test_all_tickets_omits_master_filter() -> None:
         return httpx.Response(200, json=[])
 
     assert await TechPortalClient(settings(), transport=httpx.MockTransport(handler)).tickets(None, "30.07.2026") == []
+
+
+@pytest.mark.asyncio
+async def test_ticket_list_loads_all_pages_and_deduplicates_tickets() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        page = json.loads(request.content)["page"]
+        pages = {
+            0: [{"id": 1, "masters": [87], "tags": {}}],
+            1: [{"id": 1, "masters": [87], "tags": {}}, {"id": 2, "masters": [87], "tags": {}}],
+            2: [],
+        }
+        return httpx.Response(200, json=pages[page])
+
+    result = await TechPortalClient(settings(), transport=httpx.MockTransport(handler)).tickets(87, "30.07.2026")
+
+    assert [ticket.id for ticket in result] == [1, 2]
 
 
 @pytest.mark.asyncio

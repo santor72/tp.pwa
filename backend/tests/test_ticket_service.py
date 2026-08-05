@@ -8,7 +8,7 @@ import pytest
 
 from app.cache_store import CacheStore
 from app.config import Settings
-from app.errors import TicketNotFoundError
+from app.errors import RepairCommentRequiredError, TicketNotFoundError
 from app.actors import Actor
 from app.schemas import TechPortalTicket, TechPortalUser
 from app.tickets import TicketService
@@ -22,6 +22,7 @@ class FakeTechPortal:
         self.sparse_persist = sparse_persist
         self.ticket_calls: list[tuple[int | str, str]] = []
         self.persist_calls: list[tuple[int, dict[str, Any]]] = []
+        self.comment_persist_calls: list[dict[str, Any]] = []
         self.user_calls = 0
 
     async def tickets(self, user_id: int | str | None, date: str) -> list[TechPortalTicket]:
@@ -38,6 +39,14 @@ class FakeTechPortal:
             return TechPortalTicket.model_validate({"id": ticket_id, "tags": tags})
         source = next(item for item in self.ticket_result if item.id == ticket_id)
         return source.model_copy(update={"tags": tags})
+
+    async def ticket_by_id(self, ticket_id: int) -> dict[str, Any] | None:
+        source = next((item for item in self.ticket_result if item.id == ticket_id), None)
+        return source.model_dump(mode="json") if source else None
+
+    async def persist_ticket_with_comment(self, ticket: dict[str, Any]) -> TechPortalTicket:
+        self.comment_persist_calls.append(ticket)
+        return TechPortalTicket.model_validate(ticket)
 
 
 def ticket(
@@ -176,6 +185,26 @@ async def test_completion_rejects_ticket_not_assigned_to_session_user() -> None:
         await service(client).set_completed(87, "today", 32412, True)
 
     assert client.persist_calls == []
+
+
+@pytest.mark.asyncio
+async def test_repair_requires_comment_and_persists_it_with_completion() -> None:
+    source = ticket(tags={"Заявка на выезд": {}})
+    client = FakeTechPortal([source])
+    ticket_service = service(client)
+
+    with pytest.raises(RepairCommentRequiredError):
+        await ticket_service.set_completed(87, "today", source.id, True)
+    assert client.comment_persist_calls == []
+
+    result = await ticket_service.set_completed(87, "today", source.id, True, "Заменили кабель")
+
+    assert result.completed is True
+    assert client.comment_persist_calls == [{
+        **source.model_dump(mode="json"),
+        "tags": {"Заявка на выезд": {}, "Работы произведены": {}},
+        "comments": "Заменили кабель",
+    }]
 
 
 @pytest.mark.asyncio

@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 from app.actors import Actor
 from app.cache_store import CacheStore
 from app.config import Settings
-from app.errors import TicketNotFoundError
+from app.errors import RepairCommentRequiredError, TicketNotFoundError
 from app.schemas import (
     TechPortalTicket,
     TechPortalUser,
@@ -75,6 +75,7 @@ class TicketService:
         day: Literal["today", "tomorrow"],
         ticket_id: int,
         completed: bool,
+        comment: str | None = None,
     ) -> TicketResponse:
         offset = 0 if day == "today" else 1
         target = datetime.now(MOSCOW).date() + timedelta(days=offset)
@@ -89,12 +90,29 @@ class TicketService:
         )
         if ticket is None:
             raise TicketNotFoundError()
+        is_repair = CONNECTION_TAG not in ticket.tags
+        if completed and is_repair:
+            if not comment:
+                raise RepairCommentRequiredError()
+            raw_ticket = await self._client.ticket_by_id(ticket_id)
+            if raw_ticket is None:
+                raise TicketNotFoundError()
+            ticket = TechPortalTicket.model_validate(raw_ticket)
+            if not self._is_master(ticket, user_id):
+                raise TicketNotFoundError()
+        else:
+            raw_ticket = None
         updated_tags = dict(ticket.tags)
         if completed:
             updated_tags[COMPLETED_TAG] = {}
         else:
             updated_tags.pop(COMPLETED_TAG, None)
-        persisted = await self._client.persist_ticket(ticket_id, updated_tags)
+        if raw_ticket is not None:
+            raw_ticket["tags"] = updated_tags
+            raw_ticket["comments"] = comment
+            persisted = await self._client.persist_ticket_with_comment(raw_ticket)
+        else:
+            persisted = await self._client.persist_ticket(ticket_id, updated_tags)
         # tickets/persist может вернуть только изменённые поля (например id и
         # tags). Сохраняем полные данные уже загруженной заявки для карточки.
         persisted_fields = {
@@ -111,8 +129,9 @@ class TicketService:
         day: Literal["today", "tomorrow"],
         ticket_id: int,
         completed: bool,
+        comment: str | None = None,
     ) -> TicketResponse:
-        return await self.set_completed(actor.techportal_user_id, day, ticket_id, completed)
+        return await self.set_completed(actor.techportal_user_id, day, ticket_id, completed, comment)
 
     async def _user_names(self) -> dict[str, str]:
         cached = await self._cache.get_json(self.users_cache_key)

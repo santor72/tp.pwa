@@ -87,11 +87,11 @@ export const api = {
     headers: { 'X-CSRF-Token': csrfToken },
   }),
   tickets: (day: TicketDay, scope: 'assigned' | 'all' = 'assigned') => request<Ticket[]>(`/api/tickets/${day}${scope === 'all' ? '?scope=all' : ''}`),
-  setTicketCompletion: (ticketId: number, day: TicketDay, completed: boolean, csrfToken: string) =>
+  setTicketCompletion: (ticketId: number, day: TicketDay, completed: boolean, csrfToken: string, comment?: string) =>
     request<Ticket>(`/api/tickets/${ticketId}/completion`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
-      body: JSON.stringify({ day, completed }),
+      body: JSON.stringify({ day, completed, ...(comment ? { comment } : {}) }),
     }),
   connectDomofon: (serviceLogin: string, csrfToken: string) => request<DomofonOperationResult>('/api/domofon/connect', {
     method: 'POST',

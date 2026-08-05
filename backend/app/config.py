@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     tp_base_token: str = ""
     tp_auth_timeout_seconds: float = 20.0
     tp_api_timeout_seconds: float = Field(default=20.0, gt=0)
+    tp_tickets_max_pages: int = Field(default=100, gt=0)
     tp_users_cache_ttl_seconds: int = Field(default=300, gt=0)
 
     redis_host: str = "redis"

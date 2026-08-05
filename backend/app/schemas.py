@@ -168,6 +168,12 @@ class TicketResponse(BaseModel):
 class TicketCompletionRequest(BaseModel):
     completed: bool
     day: Literal["today", "tomorrow"]
+    comment: str | None = Field(default=None, max_length=4000)
+
+    @field_validator("comment")
+    @classmethod
+    def strip_comment(cls, value: str | None) -> str | None:
+        return value.strip() if value else None
 
 
 class MessengerLinkResponse(BaseModel):

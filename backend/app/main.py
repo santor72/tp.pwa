@@ -228,6 +228,7 @@ async def set_ticket_completion(
             payload.day,
             ticket_id,
             payload.completed,
+            payload.comment,
         )
     except ApiError as exc:
         audit(

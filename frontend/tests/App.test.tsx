@@ -51,6 +51,7 @@ async function openDomofon() {
 
 afterEach(() => {
   cleanup()
+  localStorage.clear()
   vi.useRealTimers()
   vi.unstubAllGlobals()
 })
@@ -213,6 +214,27 @@ describe('Capabilities', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/tickets/today?scope=all', expect.any(Object)))
     expect(await screen.findByText('Назначены: Иван Иванов, Пётр Петров')).toBeTruthy()
     expect(screen.queryByText('Удерживайте карточку, чтобы изменить статус')).toBeNull()
+    expect(localStorage.getItem('tp-pwa:tickets-scope')).toBe('all')
+  })
+})
+
+describe('Фильтр закрытых заявок', () => {
+  it('по умолчанию скрывает исполненные заявки и сохраняет выбор', async () => {
+    const completedTicket = { ...ticket, completed: true }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/api/auth/session') return json(session)
+      if (String(input) === '/api/tickets/today') return json([completedTicket])
+      throw new Error(`Неожиданный запрос: ${input}`)
+    }))
+
+    render(<App />)
+
+    expect(await screen.findByText('Неисполненных заявок нет')).toBeTruthy()
+    const checkbox = screen.getByLabelText('Закрытые') as HTMLInputElement
+    expect(checkbox.checked).toBe(false)
+    fireEvent.click(checkbox)
+    expect(await screen.findByText(ticket.address)).toBeTruthy()
+    expect(localStorage.getItem('tp-pwa:show-closed-tickets')).toBe('true')
   })
 })
 
@@ -278,7 +300,7 @@ describe('Заявки', () => {
     fireEvent.click(screen.getByRole('button', { name: /Завтра/ }))
 
     expect(await screen.findByRole('heading', { name: 'Заявки завтра' })).toBeTruthy()
-    expect(await screen.findByText('На этот день заявок нет')).toBeTruthy()
+    expect(await screen.findByText('Неисполненных заявок нет')).toBeTruthy()
     expect(fetchMock).toHaveBeenCalledWith('/api/tickets/tomorrow', expect.any(Object))
   })
 
@@ -308,7 +330,7 @@ describe('Заявки', () => {
     await vi.advanceTimersByTimeAsync(600)
     vi.useRealTimers()
 
-    await waitFor(() => expect(card.className).toContain('ticket-completed'))
+    expect(await screen.findByText('Неисполненных заявок нет')).toBeTruthy()
     expect(JSON.parse(String(completionRequest?.body))).toEqual({ day: 'today', completed: true })
     expect(new Headers(completionRequest?.headers).get('X-CSRF-Token')).toBe('csrf-test')
     expect(screen.queryByRole('heading', { name: 'Заявка №32412' })).toBeNull()

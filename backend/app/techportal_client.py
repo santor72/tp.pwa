@@ -32,27 +32,33 @@ class TechPortalClient:
         ticket_filter: dict[str, Any] = {
             "tags": {},
             "createdBy": [],
-            "closedFrom": "-",
             "scheduledTo": date,
             "scheduledFrom": date,
         }
         if user_id is not None:
             ticket_filter["masterIds"] = [user_id]
-        payload = {
-            "page": 0,
-            "filters": {
-                "and": [
-                    ticket_filter
-                ]
-            },
-        }
-        data = await self._request("POST", "tickets/get", json=payload)
-        if not isinstance(data, list):
-            raise TechPortalResponseError()
-        try:
-            return [TechPortalTicket.model_validate(item) for item in data]
-        except ValidationError as exc:
-            raise TechPortalResponseError() from exc
+        tickets: dict[int, TechPortalTicket] = {}
+        for page in range(self._settings.tp_tickets_max_pages):
+            payload = {"page": page, "filters": {"and": [ticket_filter]}}
+            data = await self._request("POST", "tickets/get", json=payload)
+            if not isinstance(data, list):
+                raise TechPortalResponseError()
+            try:
+                page_tickets = [TechPortalTicket.model_validate(item) for item in data]
+            except ValidationError as exc:
+                raise TechPortalResponseError() from exc
+            if not page_tickets:
+                return list(tickets.values())
+            new_ticket_count = sum(ticket.id not in tickets for ticket in page_tickets)
+            tickets.update({ticket.id: ticket for ticket in page_tickets})
+            if new_ticket_count == 0:
+                logger.warning("Повтор страницы заявок ТехПортала", extra={"event": "techportal.tickets.repeated_page", "fields": {"page": page}})
+                return list(tickets.values())
+        logger.warning(
+            "Достигнут лимит страниц заявок ТехПортала",
+            extra={"event": "techportal.tickets.page_limit", "fields": {"max_pages": self._settings.tp_tickets_max_pages}},
+        )
+        return list(tickets.values())
 
     async def users(self) -> list[TechPortalUser]:
         data = await self._request("GET", "techportal-user/list")
@@ -60,6 +66,25 @@ class TechPortalClient:
             raise TechPortalResponseError()
         try:
             return [TechPortalUser.model_validate(item) for item in data]
+        except ValidationError as exc:
+            raise TechPortalResponseError() from exc
+
+    async def ticket_by_id(self, ticket_id: int) -> dict[str, Any] | None:
+        data = await self._request(
+            "POST",
+            "tickets/get",
+            json={"page": 0, "filters": {"and": [{"createdBy": [], "masterIds": [], "id": ticket_id}]}},
+        )
+        if not isinstance(data, list):
+            raise TechPortalResponseError()
+        return next((item for item in data if isinstance(item, dict) and item.get("id") == ticket_id), None)
+
+    async def persist_ticket_with_comment(self, ticket: dict[str, Any]) -> TechPortalTicket:
+        data = await self._request("POST", "tickets/persist", json={"ticket": ticket})
+        if not isinstance(data, dict):
+            raise TechPortalResponseError()
+        try:
+            return TechPortalTicket.model_validate(data)
         except ValidationError as exc:
             raise TechPortalResponseError() from exc
 

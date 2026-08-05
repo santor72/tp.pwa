@@ -80,6 +80,11 @@ class TicketNotFoundError(ApiError):
         )
 
 
+class RepairCommentRequiredError(ApiError):
+    def __init__(self) -> None:
+        super().__init__(status.HTTP_422_UNPROCESSABLE_ENTITY, "REPAIR_COMMENT_REQUIRED", "Опишите выполненные работы перед закрытием ремонта")
+
+
 class EsbNotConfiguredError(ApiError):
     def __init__(self) -> None:
         super().__init__(

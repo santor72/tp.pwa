@@ -23,6 +23,8 @@ import {
 type AppScreen = 'loading' | 'login' | 'app'
 type AppTab = TicketDay | 'domofon' | 'settings'
 type DomofonScreen = 'main' | 'connect-result' | 'addresses' | 'create-form' | 'create-result'
+const SHOW_CLOSED_TICKETS_KEY = 'tp-pwa:show-closed-tickets'
+const TICKETS_SCOPE_KEY = 'tp-pwa:tickets-scope'
 
 function errorMessage(error: unknown): string {
   return error instanceof ApiError ? error.message : 'Не удалось связаться с сервером'
@@ -431,8 +433,10 @@ function TicketDetails({
   busy: boolean
   editable: boolean
   onBack: () => void
-  onToggle: () => void
+  onToggle: (comment?: string) => void
 }) {
+  const [comment, setComment] = useState('')
+  const needsComment = ticket.kind === 'repair' && !ticket.completed
   return (
     <section className="ticket-details">
       <div className="step-heading with-back">
@@ -453,8 +457,9 @@ function TicketDetails({
           <h2>Описание</h2>
           <p>{ticket.description || 'Описание отсутствует'}</p>
         </div>
-        {editable && <button className="primary-button" disabled={busy} onClick={onToggle}>
-          {busy ? 'Сохранение…' : ticket.completed ? 'Вернуть в работу' : 'Отметить исполненной'}
+        {editable && needsComment && <Field label="Что выполнено" required><textarea value={comment} onChange={event => setComment(event.target.value)} rows={4} placeholder="Опишите выполненные работы" /></Field>}
+        {editable && <button className="primary-button" disabled={busy || (needsComment && !comment.trim())} onClick={() => onToggle(needsComment ? comment.trim() : undefined)}>
+          {busy ? 'Сохранение…' : needsComment ? 'Завершить ремонт' : ticket.completed ? 'Вернуть в работу' : 'Отметить исполненной'}
         </button>}
       </div>
       <section className="comments-section">
@@ -480,8 +485,20 @@ function Tickets({ day, session }: { day: TicketDay; session: Session }) {
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId] = useState<number | null>(null)
   const [error, setError] = useState('')
-  const [scope, setScope] = useState<'assigned' | 'all'>('assigned')
+  const [scope, setScope] = useState<'assigned' | 'all'>(() => (
+    session.capabilities.all_tickets && localStorage.getItem(TICKETS_SCOPE_KEY) === 'all' ? 'all' : 'assigned'
+  ))
+  const [showClosed, setShowClosed] = useState(() => localStorage.getItem(SHOW_CLOSED_TICKETS_KEY) === 'true')
   const canViewAll = session.capabilities.all_tickets
+
+  useEffect(() => { localStorage.setItem(SHOW_CLOSED_TICKETS_KEY, String(showClosed)) }, [showClosed])
+  useEffect(() => {
+    if (!canViewAll) {
+      setScope('assigned')
+      return
+    }
+    localStorage.setItem(TICKETS_SCOPE_KEY, scope)
+  }, [canViewAll, scope])
 
   async function load() {
     setLoading(true)
@@ -506,12 +523,12 @@ function Tickets({ day, session }: { day: TicketDay; session: Session }) {
     return () => { active = false }
   }, [day, scope])
 
-  async function toggle(ticket: Ticket) {
+  async function toggle(ticket: Ticket, comment?: string) {
     if (busyId !== null) return
     setBusyId(ticket.id)
     setError('')
     try {
-      const updated = await api.setTicketCompletion(ticket.id, day, !ticket.completed, session.csrf_token)
+      const updated = await api.setTicketCompletion(ticket.id, day, !ticket.completed, session.csrf_token, comment)
       setTickets(current => current.map(item => item.id === updated.id ? updated : item))
     } catch (cause) {
       setError(errorMessage(cause))
@@ -521,6 +538,7 @@ function Tickets({ day, session }: { day: TicketDay; session: Session }) {
   }
 
   const selected = tickets.find(ticket => ticket.id === selectedId)
+  const visibleTickets = showClosed ? tickets : tickets.filter(ticket => !ticket.completed)
   if (selected) {
     return (
       <>
@@ -530,7 +548,7 @@ function Tickets({ day, session }: { day: TicketDay; session: Session }) {
           busy={busyId === selected.id}
           editable={selected.can_change_completion !== false}
           onBack={() => { setSelectedId(null); setError('') }}
-          onToggle={() => toggle(selected)}
+          onToggle={comment => toggle(selected, comment)}
         />
       </>
     )
@@ -545,16 +563,17 @@ function Tickets({ day, session }: { day: TicketDay; session: Session }) {
         </div>
         <div className="tickets-actions">
           {canViewAll && <label className="tickets-scope"><input type="checkbox" checked={scope === 'all'} onChange={event => { setSelectedId(null); setScope(event.target.checked ? 'all' : 'assigned') }} />Все заявки</label>}
+          <label className="tickets-scope"><input type="checkbox" checked={showClosed} onChange={event => setShowClosed(event.target.checked)} />Закрытые</label>
           <button className="refresh-button" onClick={load} disabled={loading} aria-label="Обновить заявки">↻</button>
         </div>
       </div>
       {error && <ErrorBox text={error} />}
       {loading
         ? <div className="panel empty-state">Загрузка заявок…</div>
-        : tickets.length === 0
-          ? <div className="panel empty-state">На этот день заявок нет</div>
+        : visibleTickets.length === 0
+          ? <div className="panel empty-state">Неисполненных заявок нет</div>
           : <div className="ticket-list">
-              {tickets.map(ticket => (
+              {visibleTickets.map(ticket => (
                 <TicketCard
                   key={ticket.id}
                   ticket={ticket}
@@ -562,7 +581,7 @@ function Tickets({ day, session }: { day: TicketDay; session: Session }) {
                   editable={ticket.can_change_completion !== false}
                   showMasters={scope === 'all'}
                   onOpen={() => setSelectedId(ticket.id)}
-                  onToggle={() => toggle(ticket)}
+                  onToggle={() => ticket.kind === 'repair' && !ticket.completed ? setSelectedId(ticket.id) : toggle(ticket)}
                 />
               ))}
             </div>}
