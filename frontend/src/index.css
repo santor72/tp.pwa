@@ -12,8 +12,8 @@
 }
 
 * { box-sizing: border-box; }
-html, body, #root { min-height: 100%; margin: 0; }
-body { min-height: 100svh; }
+html, body, #root { width: 100%; min-height: 100%; margin: 0; }
+body { min-height: 100svh; min-height: 100dvh; overflow-x: clip; }
 button, input { font: inherit; }
 a { color: #1d4ed8; overflow-wrap: anywhere; }
 button { cursor: pointer; }
@@ -90,7 +90,7 @@ input:focus, textarea:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px #dbea
 .icon-button { width: 2.55rem; height: 2.55rem; padding: .65rem; background: white; border: 1px solid #e2e8f0; }
 .icon-button svg, .location-icon svg { width: 100%; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
-.app-page { min-height: 100vh; max-width: 44rem; margin: auto; padding: 1rem 1rem 2rem; }
+.app-page { min-height: 100svh; min-height: 100dvh; max-width: 44rem; margin: auto; padding: max(1rem, env(safe-area-inset-top)) 1rem 2rem; }
 .app-header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: .35rem 0 1rem; }
 .app-header > div { display: grid; }
 .app-header span { color: #64748b; font-size: .8rem; }
@@ -125,7 +125,7 @@ input:focus, textarea:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px #dbea
 .create-form { display: grid; gap: 1rem; }
 .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
 
-.with-navigation { padding-bottom: 6.5rem; }
+.with-navigation { padding-bottom: calc(6.5rem + env(safe-area-inset-bottom)); }
 .bottom-nav {
   position: fixed;
   z-index: 20;
@@ -158,8 +158,9 @@ input:focus, textarea:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px #dbea
 .tickets-screen, .ticket-details { display: grid; gap: 1rem; }
 .tickets-heading {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 1rem;
   padding: .35rem 0;
 }
@@ -167,6 +168,8 @@ input:focus, textarea:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px #dbea
 .tickets-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 0.75rem;
 }
 
@@ -178,7 +181,6 @@ input:focus, textarea:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px #dbea
   font-size: 0.875rem;
   white-space: nowrap;
 }
-
 .tickets-scope input {
   width: 1rem;
   height: 1rem;
@@ -298,6 +300,10 @@ input:focus, textarea:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px #dbea
 .comment-card p { margin: .55rem 0 0; color: #334155; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 @media (max-width: 600px) {
+  .tickets-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
   .login-page {
     min-height: 100svh;
     min-height: 100dvh;
