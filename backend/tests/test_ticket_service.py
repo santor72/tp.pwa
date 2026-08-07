@@ -164,6 +164,7 @@ async def test_completion_uses_authoritative_full_tags_and_can_remove_marker() -
     assert completed.completed is True
     assert completed.address == "СНТ Волга, участок 96, дом 12, кв. 34"
     assert completed.client_phone == "79254553958"
+    assert completed.client_phones == ["79254553958"]
     assert completed.client_name == "Денис Денис"
     assert completed.description == "Описание работ"
     assert completed.comments[0].text == "Работы согласованы"

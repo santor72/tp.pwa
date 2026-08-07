@@ -18,12 +18,18 @@ class SessionStore:
         self._redis = redis
         self._settings = settings
 
-    async def create(self, user: UserProfile, internal_user_id: UUID | None = None) -> tuple[str, SessionData]:
+    async def create(
+        self,
+        user: UserProfile,
+        internal_user_id: UUID | None = None,
+        upstream_cookies: dict[str, str] | None = None,
+    ) -> tuple[str, SessionData]:
         now = datetime.now(UTC)
         session_id = secrets.token_urlsafe(32)
         session = SessionData(
             user=user,
             internal_user_id=internal_user_id,
+            upstream_cookies=upstream_cookies or {},
             csrf_token=secrets.token_urlsafe(32),
             created_at=now,
             absolute_expires_at=now + timedelta(seconds=self._settings.session_absolute_ttl_seconds),

@@ -109,6 +109,29 @@ input:focus, textarea:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px #dbea
 .divider span { padding: 0 .8rem; }
 
 .error-box { padding: .8rem; border-radius: .8rem; color: #b91c1c; background: #fef2f2; font-size: .88rem; }
+.success-box {
+  position: fixed;
+  z-index: 20;
+  top: calc(1rem + env(safe-area-inset-top));
+  left: 1rem;
+  right: 1rem;
+  max-width: 34rem;
+  margin: auto;
+  display: flex;
+  align-items: center;
+  gap: .7rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid #86efac;
+  border-radius: 1rem;
+  color: #fff;
+  background: #15803d;
+  box-shadow: 0 14px 35px #14532d66;
+  font-size: .98rem;
+  font-weight: 800;
+  animation: toast-in .2s ease-out;
+}
+.success-box span { display: grid; width: 2rem; height: 2rem; place-items: center; border-radius: 50%; color: #166534; background: white; font-size: 1.05rem; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(-.75rem); } to { opacity: 1; transform: translateY(0); } }
 .result-panel { min-height: 12rem; display: flex; align-items: flex-start; gap: .8rem; }
 .result-panel strong { display: block; margin-top: .25rem; }
 .result-panel p { color: #475569; line-height: 1.55; overflow-wrap: anywhere; }
@@ -258,7 +281,18 @@ input:focus, textarea:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px #dbea
   font-size: .78rem;
 }
 .ticket-scheduled strong { color: #172033; font-size: .88rem; }
-.ticket-card > a { width: fit-content; font-weight: 800; }
+.phone-button {
+  width: fit-content;
+  padding: 0;
+  border: 0;
+  color: #1d4ed8;
+  background: transparent;
+  font-weight: 800;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.phone-button:not(:disabled) { text-decoration: underline; }
+.ticket-phones { display: grid; justify-items: start; gap: .25rem; }
 .ticket-muted { color: #94a3b8; font-size: .85rem; }
 .long-press-hint { margin-top: auto; color: #94a3b8; font-size: .68rem; }
 
@@ -382,7 +416,7 @@ input:focus, textarea:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px #dbea
   .ticket-scheduled strong {
     font-size: 1rem;
   }
-  .ticket-card > a {
+  .phone-button {
     font-size: 1rem;
   }
   .ticket-muted {

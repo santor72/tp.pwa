@@ -22,6 +22,7 @@ from app.schemas import (
     DomofonConnectRequest,
     DomofonCreateRequest,
     DomofonOperationResponse,
+    DialRequest,
     ErrorResponse,
     LoginRequest,
     SessionResponse,
@@ -140,15 +141,19 @@ async def health_ready(request: Request) -> dict[str, str]:
 async def login(payload: LoginRequest, response: Response, request: Request) -> SessionResponse:
     verify_origin(request, settings)
     try:
-        user = await request.app.state.auth_provider.authenticate(payload.email, payload.password)
+        authenticated = await request.app.state.auth_provider.authenticate(payload.email, payload.password)
     except ApiError as exc:
         audit(logger, "auth.login.failed", result="failure", login_hash=stable_hash(payload.email), code=exc.code)
         raise
-    persistent_user = await request.app.state.messenger_links.upsert_user(user)
-    session_id, session = await get_session_store(request).create(user, persistent_user.id)
+    persistent_user = await request.app.state.messenger_links.upsert_user(authenticated.user)
+    session_id, session = await get_session_store(request).create(
+        authenticated.user,
+        persistent_user.id,
+        authenticated.cookies,
+    )
     set_session_cookie(response, session_id)
-    audit(logger, "auth.login.succeeded", user_id=user.id, result="success", session_hash=stable_hash(session_id))
-    return SessionResponse(user=user, csrf_token=session.csrf_token, capabilities=capabilities_for(user.role, user.user_permissions, settings.messenger_show))
+    audit(logger, "auth.login.succeeded", user_id=authenticated.user.id, result="success", session_hash=stable_hash(session_id))
+    return SessionResponse(user=authenticated.user, csrf_token=session.csrf_token, capabilities=capabilities_for(authenticated.user.role, authenticated.user.user_permissions, settings.messenger_show))
 
 
 @app.get("/api/auth/session", response_model=SessionResponse)
@@ -251,6 +256,29 @@ async def set_ticket_completion(
         result="success",
     )
     return result
+
+
+@app.post("/api/conversations/dial", status_code=204)
+async def dial_subscriber(
+    payload: DialRequest,
+    request: Request,
+    session_pair: tuple[str, object] = Depends(require_csrf),
+) -> Response:
+    _, session = session_pair
+    actor = await actor_from_session(request, session)
+    try:
+        await request.app.state.ticket_service.dial(payload.phone, session.upstream_cookies)
+    except ApiError as exc:
+        audit(
+            logger,
+            "conversations.dial.failed",
+            user_id=str(actor.user_id), channel=actor.channel,
+            result="failure",
+            code=exc.code,
+        )
+        raise
+    audit(logger, "conversations.dial.succeeded", user_id=str(actor.user_id), channel=actor.channel, result="success")
+    return Response(status_code=204)
 
 
 @app.post("/api/domofon/connect", response_model=DomofonOperationResponse)

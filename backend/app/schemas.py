@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
@@ -56,6 +57,7 @@ class SessionData(BaseModel):
 
     user: UserProfile
     internal_user_id: UUID | None = None
+    upstream_cookies: dict[str, str] = Field(default_factory=dict)
     csrf_token: str
     created_at: datetime
     absolute_expires_at: datetime
@@ -154,6 +156,7 @@ class TicketResponse(BaseModel):
     id: int
     address: str
     client_phone: str
+    client_phones: list[str] = Field(default_factory=list)
     client_name: str
     description: str
     scheduled_at: datetime | None = None
@@ -174,6 +177,18 @@ class TicketCompletionRequest(BaseModel):
     @classmethod
     def strip_comment(cls, value: str | None) -> str | None:
         return value.strip() if value else None
+
+
+class DialRequest(BaseModel):
+    phone: str = Field(min_length=7, max_length=32)
+
+    @field_validator("phone")
+    @classmethod
+    def normalize_phone(cls, value: str) -> str:
+        digits = re.sub(r"\D", "", value)
+        if not 7 <= len(digits) <= 15:
+            raise ValueError("Укажите корректный номер телефона")
+        return f"+{digits}"
 
 
 class MessengerLinkResponse(BaseModel):

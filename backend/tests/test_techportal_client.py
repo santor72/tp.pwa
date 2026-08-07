@@ -90,6 +90,24 @@ async def test_persist_sends_complete_tags_element() -> None:
 
 
 @pytest.mark.asyncio
+async def test_dial_uses_origin_api_path_and_accepts_empty_success_response() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url == httpx.URL("https://tp.example/csrf-token"):
+            assert request.headers["cookie"] == "tp-session=employee-session"
+            return httpx.Response(200, json={"_csrf": "employee-csrf"})
+        assert request.url == httpx.URL("https://tp.example/api/conversations/dial")
+        assert request.headers["cookie"] == "tp-session=employee-session"
+        assert "Authorization" not in request.headers
+        assert request.headers["X-CSRF-Token"] == "employee-csrf"
+        assert json.loads(request.content) == {"phone": "+79254553958"}
+        return httpx.Response(204)
+
+    await TechPortalClient(settings(), transport=httpx.MockTransport(handler)).dial(
+        "+79254553958", {"tp-session": "employee-session"},
+    )
+
+
+@pytest.mark.asyncio
 async def test_client_maps_configuration_auth_and_network_errors() -> None:
     with pytest.raises(TechPortalNotConfiguredError):
         await TechPortalClient(Settings(tp_base_token="")).users()

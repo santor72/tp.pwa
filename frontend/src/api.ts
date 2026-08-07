@@ -30,6 +30,7 @@ export type Ticket = {
   id: number
   address: string
   client_phone: string
+  client_phones: string[]
   client_name: string
   description: string
   scheduled_at: string | null
@@ -93,6 +94,11 @@ export const api = {
       headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
       body: JSON.stringify({ day, completed, ...(comment ? { comment } : {}) }),
     }),
+  dialPhone: (phone: string, csrfToken: string) => request<void>('/api/conversations/dial', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+    body: JSON.stringify({ phone }),
+  }),
   connectDomofon: (serviceLogin: string, csrfToken: string) => request<DomofonOperationResult>('/api/domofon/connect', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },

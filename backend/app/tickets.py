@@ -133,6 +133,9 @@ class TicketService:
     ) -> TicketResponse:
         return await self.set_completed(actor.techportal_user_id, day, ticket_id, completed, comment)
 
+    async def dial(self, phone: str, upstream_cookies: dict[str, str]) -> None:
+        await self._client.dial(phone, upstream_cookies)
+
     async def _user_names(self) -> dict[str, str]:
         cached = await self._cache.get_json(self.users_cache_key)
         if isinstance(cached, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in cached.items()):
@@ -147,7 +150,7 @@ class TicketService:
         return names
 
     def _normalize(self, ticket: TechPortalTicket, users: dict[str, str]) -> TicketResponse:
-        phone = ticket.clientPhone or (ticket.phones[0] if ticket.phones else "")
+        phones = self._phones(ticket)
         comments: list[TicketComment] = []
         for history_item in ticket.history:
             for change in history_item.changes:
@@ -167,7 +170,8 @@ class TicketService:
         return TicketResponse(
             id=ticket.id,
             address=self._address_text(ticket),
-            client_phone=phone,
+            client_phone=phones[0] if phones else "",
+            client_phones=phones,
             client_name=ticket.clientName or "",
             description=ticket.description or "",
             scheduled_at=self._to_moscow(ticket.scheduledDate),
@@ -181,6 +185,15 @@ class TicketService:
     @staticmethod
     def _is_master(ticket: TechPortalTicket, user_id: int | str) -> bool:
         return any(str(master_id) == str(user_id) for master_id in ticket.masters)
+
+    @staticmethod
+    def _phones(ticket: TechPortalTicket) -> list[str]:
+        phones: list[str] = []
+        for value in (ticket.clientPhone, *ticket.phones):
+            if not value or not value.strip() or value.strip() in phones:
+                continue
+            phones.append(value.strip())
+        return phones
 
     @staticmethod
     def _address_text(ticket: TechPortalTicket) -> str:

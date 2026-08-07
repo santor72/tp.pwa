@@ -1,4 +1,5 @@
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -10,13 +11,19 @@ from app.schemas import UserProfile
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True, slots=True)
+class AuthenticatedUser:
+    user: UserProfile
+    cookies: dict[str, str]
+
+
 class TechPortalAuthProvider:
     """Использует ТехПортал только для проверки учётных данных."""
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
 
-    async def authenticate(self, email: str, password: str) -> UserProfile:
+    async def authenticate(self, email: str, password: str) -> AuthenticatedUser:
         headers = {
             "Accept": "application/json, text/plain, */*",
             "Referer": f"{self._settings.tp_origin_url}/login",
@@ -46,12 +53,15 @@ class TechPortalAuthProvider:
             payload: dict[str, Any] = response.json()
             properties = payload.get("properties")
             permissions = properties.get("permissions") if isinstance(properties, dict) else {}
-            return UserProfile(
-                id=payload["id"],
-                email=payload["email"],
-                first_name=payload.get("firstName"),
-                status=payload.get("status"),
-                user_permissions=permissions if isinstance(permissions, dict) else {},
+            return AuthenticatedUser(
+                user=UserProfile(
+                    id=payload["id"],
+                    email=payload["email"],
+                    first_name=payload.get("firstName"),
+                    status=payload.get("status"),
+                    user_permissions=permissions if isinstance(permissions, dict) else {},
+                ),
+                cookies=dict(client.cookies.items()),
             )
         except (KeyError, TypeError, ValueError) as exc:
             logger.error("Некорректный профиль ТехПортала", extra={"event": "auth.provider.invalid_profile", "fields": {}})

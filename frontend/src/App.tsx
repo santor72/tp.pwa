@@ -86,6 +86,16 @@ function ErrorBox({ text }: { text: string }) {
   return <div role="alert" className="error-box">{text}</div>
 }
 
+function SuccessBox({ text }: { text: string }) {
+  return <div role="status" className="success-box"><span aria-hidden="true">☎</span>{text}</div>
+}
+
+function PhoneButton({ phone, busy, onDial }: { phone: string; busy: boolean; onDial: (phone: string) => void }) {
+  return <button className="phone-button" type="button" disabled={busy} onClick={event => { event.stopPropagation(); onDial(phone) }}>
+    {busy ? 'Соединение…' : phone}
+  </button>
+}
+
 function Settings({ session }: { session: Session }) {
   const [link, setLink] = useState<MessengerLink | null>(null)
   const [created, setCreated] = useState<MessengerLinkCreate | null>(null)
@@ -332,15 +342,19 @@ function TicketCard({
   busy,
   editable,
   showMasters,
+  dialing,
   onOpen,
   onToggle,
+  onDial,
 }: {
   ticket: Ticket
   busy: boolean
   editable: boolean
   showMasters: boolean
+  dialing: boolean
   onOpen: () => void
   onToggle: () => void
+  onDial: (phone: string) => void
 }) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const longPressTriggered = useRef(false)
@@ -406,8 +420,8 @@ function TicketCard({
       <time className="ticket-scheduled" dateTime={ticket.scheduled_at || undefined}>
         Назначено: <strong>{formatTime(ticket.scheduled_at)}</strong>
       </time>
-      {ticket.client_phone
-        ? <a href={`tel:${ticket.client_phone}`} onClick={event => event.stopPropagation()}>{ticket.client_phone}</a>
+      {ticket.client_phones.length > 0
+        ? <div className="ticket-phones">{ticket.client_phones.map(phone => <PhoneButton key={phone} phone={phone} busy={dialing} onDial={onDial} />)}</div>
         : <span className="ticket-muted">Телефон не указан</span>}
       {showMasters && ticket.assigned_masters.length > 0 && <p className="ticket-masters">Назначены: {ticket.assigned_masters.join(', ')}</p>}
       {editable && <small className="long-press-hint">Удерживайте карточку, чтобы изменить статус</small>}
@@ -426,14 +440,18 @@ function TicketDetails({
   ticket,
   busy,
   editable,
+  dialing,
   onBack,
   onToggle,
+  onDial,
 }: {
   ticket: Ticket
   busy: boolean
   editable: boolean
+  dialing: boolean
   onBack: () => void
   onToggle: (comment?: string) => void
+  onDial: (phone: string) => void
 }) {
   const [comment, setComment] = useState('')
   const needsComment = ticket.kind === 'repair' && !ticket.completed
@@ -451,7 +469,7 @@ function TicketDetails({
         <dl>
           <div><dt>Клиент</dt><dd>{ticket.client_name || 'Не указан'}</dd></div>
           <div><dt>Адрес</dt><dd>{ticket.address || 'Не указан'}</dd></div>
-          <div><dt>Телефон</dt><dd>{ticket.client_phone ? <a href={`tel:${ticket.client_phone}`}>{ticket.client_phone}</a> : 'Не указан'}</dd></div>
+          <div><dt>Телефоны</dt><dd>{ticket.client_phones.length > 0 ? <div className="ticket-phones">{ticket.client_phones.map(phone => <PhoneButton key={phone} phone={phone} busy={dialing} onDial={onDial} />)}</div> : 'Не указаны'}</dd></div>
         </dl>
         <div className="ticket-description">
           <h2>Описание</h2>
@@ -484,7 +502,10 @@ function Tickets({ day, session }: { day: TicketDay; session: Session }) {
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId] = useState<number | null>(null)
+  const [dialingId, setDialingId] = useState<number | null>(null)
   const [error, setError] = useState('')
+  const [dialNotice, setDialNotice] = useState('')
+  const dialNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [scope, setScope] = useState<'assigned' | 'all'>(() => (
     session.capabilities.all_tickets && localStorage.getItem(TICKETS_SCOPE_KEY) === 'all' ? 'all' : 'assigned'
   ))
@@ -537,18 +558,40 @@ function Tickets({ day, session }: { day: TicketDay; session: Session }) {
     }
   }
 
+  async function dial(ticket: Ticket, phone: string) {
+    if (dialingId !== null) return
+    setDialingId(ticket.id)
+    setError('')
+    setDialNotice('')
+    try {
+      await api.dialPhone(phone, session.csrf_token)
+      if (dialNoticeTimer.current) clearTimeout(dialNoticeTimer.current)
+      setDialNotice(`Соединение с ${phone}. Ожидайте звонка.`)
+      dialNoticeTimer.current = setTimeout(() => setDialNotice(''), 4_000)
+    } catch (cause) {
+      setError(errorMessage(cause))
+    } finally {
+      setDialingId(null)
+    }
+  }
+
+  useEffect(() => () => { if (dialNoticeTimer.current) clearTimeout(dialNoticeTimer.current) }, [])
+
   const selected = tickets.find(ticket => ticket.id === selectedId)
   const visibleTickets = showClosed ? tickets : tickets.filter(ticket => !ticket.completed)
   if (selected) {
     return (
       <>
         {error && <ErrorBox text={error} />}
+        {dialNotice && <SuccessBox text={dialNotice} />}
         <TicketDetails
           ticket={selected}
           busy={busyId === selected.id}
+          dialing={dialingId === selected.id}
           editable={selected.can_change_completion !== false}
           onBack={() => { setSelectedId(null); setError('') }}
           onToggle={comment => toggle(selected, comment)}
+          onDial={phone => dial(selected, phone)}
         />
       </>
     )
@@ -568,6 +611,7 @@ function Tickets({ day, session }: { day: TicketDay; session: Session }) {
         </div>
       </div>
       {error && <ErrorBox text={error} />}
+      {dialNotice && <SuccessBox text={dialNotice} />}
       {loading
         ? <div className="panel empty-state">Загрузка заявок…</div>
         : visibleTickets.length === 0
@@ -578,10 +622,12 @@ function Tickets({ day, session }: { day: TicketDay; session: Session }) {
                   key={ticket.id}
                   ticket={ticket}
                   busy={busyId === ticket.id}
+                  dialing={dialingId === ticket.id}
                   editable={ticket.can_change_completion !== false}
                   showMasters={scope === 'all'}
                   onOpen={() => setSelectedId(ticket.id)}
                   onToggle={() => ticket.kind === 'repair' && !ticket.completed ? setSelectedId(ticket.id) : toggle(ticket)}
+                  onDial={phone => dial(ticket, phone)}
                 />
               ))}
             </div>}

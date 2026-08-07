@@ -23,6 +23,7 @@ const ticket = {
   id: 32412,
   address: 'СНТ Волга, участок 96',
   client_phone: '79254553958',
+  client_phones: ['79254553958', '79031234567'],
   client_name: 'Денис Денис',
   description: 'Установить оборудование',
   scheduled_at: '2026-07-30T12:00:00+03:00',
@@ -275,7 +276,8 @@ describe('Заявки', () => {
     const card = await screen.findByRole('button', { name: /СНТ Волга/ })
     expect(card.className).toContain('ticket-connection')
     expect(screen.getByText(/Назначено:/).textContent).toContain('12:00')
-    expect(screen.getByRole('link', { name: '79254553958' }).getAttribute('href')).toBe('tel:79254553958')
+    expect(screen.getByRole('button', { name: '79254553958' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '79031234567' })).toBeTruthy()
     fireEvent.click(card)
 
     expect(await screen.findByRole('heading', { name: 'Заявка №32412' })).toBeTruthy()
@@ -283,6 +285,29 @@ describe('Заявки', () => {
     expect(screen.getByText('Установить оборудование')).toBeTruthy()
     expect(screen.getByText('Константин')).toBeTruthy()
     expect(screen.getByRole('link', { name: 'https://files.example/photo.jpg' })).toBeTruthy()
+  })
+
+  it('запрашивает дозвон через станцию с CSRF-защитой', async () => {
+    let dialRequest: RequestInit | undefined
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input)
+      if (path === '/api/auth/session') return json(session)
+      if (path === '/api/tickets/today') return json([ticket])
+      if (path === '/api/conversations/dial') {
+        dialRequest = init
+        return new Response(null, { status: 204 })
+      }
+      throw new Error(`Неожиданный запрос: ${path}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: '79031234567' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/conversations/dial', expect.any(Object)))
+    expect(JSON.parse(String(dialRequest?.body))).toEqual({ phone: '79031234567' })
+    expect(new Headers(dialRequest?.headers).get('X-CSRF-Token')).toBe('csrf-test')
+    expect(screen.getByRole('status').textContent).toContain('Ожидайте звонка')
   })
 
   it('загружает отдельный список для вкладки «Завтра»', async () => {

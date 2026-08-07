@@ -101,10 +101,48 @@ class TechPortalClient:
         except ValidationError as exc:
             raise TechPortalResponseError() from exc
 
+    async def dial(self, phone: str, cookies: dict[str, str]) -> None:
+        if not cookies:
+            raise TechPortalAuthError()
+        headers = {
+            "Accept": "application/json, text/plain, */*",
+            "Referer": f"{self._settings.tp_origin_url}/",
+        }
+        try:
+            async with httpx.AsyncClient(
+                timeout=self._settings.tp_api_timeout_seconds,
+                transport=self._transport,
+                cookies=cookies,
+            ) as client:
+                csrf_response = await client.get(f"{self._settings.tp_origin_url}/csrf-token", headers=headers)
+                if csrf_response.status_code in {401, 403}:
+                    raise TechPortalAuthError()
+                csrf_response.raise_for_status()
+                csrf_token = csrf_response.json().get("_csrf")
+                if not isinstance(csrf_token, str) or not csrf_token:
+                    raise TechPortalResponseError()
+                response = await client.post(
+                    f"{self._settings.tp_origin_url}/api/conversations/dial",
+                    headers={**headers, "Content-Type": "application/json", "X-CSRF-Token": csrf_token},
+                    json={"phone": phone},
+                )
+        except TechPortalAuthError:
+            raise
+        except httpx.HTTPError as exc:
+            logger.warning("ТехПортал недоступен", extra={"event": "techportal.dial.unavailable", "fields": {"error": type(exc).__name__}})
+            raise ServiceUnavailableError("ТехПортал временно недоступен") from exc
+        if response.status_code in {401, 403}:
+            raise TechPortalAuthError()
+        if response.is_error:
+            raise TechPortalCallError()
+
     async def _request(self, method: str, endpoint: str, **kwargs: Any) -> Any:
+        url = f"{self._settings.tp_base_url.rstrip('/')}/{endpoint.lstrip('/')}"
+        return await self._request_url(method, url, **kwargs)
+
+    async def _request_url(self, method: str, url: str, **kwargs: Any) -> Any:
         if not self._settings.tp_base_url or not self._settings.tp_base_token:
             raise TechPortalNotConfiguredError()
-        url = f"{self._settings.tp_base_url.rstrip('/')}/{endpoint.lstrip('/')}"
         headers = {
             "Accept": "application/json",
             "Authorization": f"Bearer {self._settings.tp_base_token}",
@@ -134,6 +172,8 @@ class TechPortalClient:
                 extra={"event": "techportal.request.failed", "fields": {"upstream_status": response.status_code}},
             )
             raise TechPortalCallError()
+        if not response.content:
+            return None
         try:
             return response.json()
         except ValueError as exc:
