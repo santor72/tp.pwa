@@ -163,8 +163,8 @@ async def test_completion_uses_authoritative_full_tags_and_can_remove_marker() -
     )
     assert completed.completed is True
     assert completed.address == "СНТ Волга, участок 96, дом 12, кв. 34"
-    assert completed.client_phone == "79254553958"
-    assert completed.client_phones == ["79254553958"]
+    assert completed.client_phone == "+79254553958"
+    assert completed.client_phones == ["+79254553958"]
     assert completed.client_name == "Денис Денис"
     assert completed.description == "Описание работ"
     assert completed.comments[0].text == "Работы согласованы"
@@ -219,3 +219,10 @@ async def test_completion_preserves_card_for_sparse_persist_response() -> None:
     assert result.address == "СНТ Волга, участок 96, дом 12, кв. 34"
     assert result.client_name == "Денис Денис"
     assert result.comments[0].author == "Константин"
+
+
+def test_phone_normalization_deduplicates_equivalent_numbers_and_keeps_unparseable_values() -> None:
+    source = ticket()
+    source.phones = ["+7 925 545-59-58", "неизвестный", "неизвестный"]
+
+    assert TicketService._phones(source) == ["+79254553958", "неизвестный"]

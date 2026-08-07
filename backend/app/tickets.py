@@ -3,6 +3,8 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
+import phonenumbers
+
 from app.actors import Actor
 from app.cache_store import CacheStore
 from app.config import Settings
@@ -190,9 +192,18 @@ class TicketService:
     def _phones(ticket: TechPortalTicket) -> list[str]:
         phones: list[str] = []
         for value in (ticket.clientPhone, *ticket.phones):
-            if not value or not value.strip() or value.strip() in phones:
+            if not value or not value.strip():
                 continue
-            phones.append(value.strip())
+            phone = value.strip()
+            try:
+                phone = phonenumbers.format_number(
+                    phonenumbers.parse(phone, "RU"),
+                    phonenumbers.PhoneNumberFormat.E164,
+                )
+            except phonenumbers.NumberParseException:
+                pass
+            if phone not in phones:
+                phones.append(phone)
         return phones
 
     @staticmethod
