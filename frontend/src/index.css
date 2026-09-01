@@ -147,6 +147,16 @@ input:focus, textarea:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px #dbea
 .empty-state { color: #64748b; text-align: center; }
 .create-form { display: grid; gap: 1rem; }
 .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+.product-grid { display: grid; gap: .75rem; }
+.product-card { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 1rem; border: 1px solid #e2e8f0; text-align: left; color: #172033; }
+.product-card span { color: #2563eb; font-weight: 800; white-space: nowrap; }
+.payment-summary { display: grid; gap: .35rem; padding-bottom: 1rem; border-bottom: 1px solid #e2e8f0; }
+.payment-summary span { color: #64748b; font-size: .9rem; overflow-wrap: anywhere; }
+.payment-progress, .payment-result { display: grid; justify-items: center; gap: 1rem; text-align: center; }
+.spinner { width: 2.5rem; height: 2.5rem; border: .3rem solid #dbeafe; border-top-color: #2563eb; border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.payment-qr { width: min(15rem, 100%); aspect-ratio: 1; object-fit: contain; }
+.payment-link { display: block; width: 100%; padding: .8rem; border-radius: .8rem; background: #eff6ff; font-weight: 800; }
 
 .with-navigation { padding-bottom: calc(6.5rem + env(safe-area-inset-bottom)); }
 .bottom-nav {

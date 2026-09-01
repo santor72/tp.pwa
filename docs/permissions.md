@@ -40,7 +40,7 @@ Frontend получает готовый набор `capabilities` и испол
 ```json
 {
   "capabilities": {
-    "domofon": true,
+    "payments": true,
     "messenger_settings": false,
     "all_tickets": false
   }
@@ -49,7 +49,7 @@ Frontend получает готовый набор `capabilities` и испол
 
 | Capability | Кто получает | Использование |
 |---|---|---|
-| `domofon` | Пользователь с `permissions.client.create === true` | Показ и доступ к разделу «Домофон» |
+| `payments` | Пользователь с `permissions.client.create === true` | Показ и доступ к разделу «Оплата» |
 | `messenger_settings` | `admin`, либо любой пользователь при `MESSENGER_SHOW=true` | Показ «Настроек» и управление привязкой Telegram |
 | `all_tickets` | `admin`, `manager` | Показ переключателя «Все заявки» |
 

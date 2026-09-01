@@ -1,5 +1,5 @@
 export type UserRole = 'admin' | 'manager' | 'user'
-export type Capabilities = { domofon: boolean; messenger_settings: boolean; all_tickets: boolean }
+export type Capabilities = { payments: boolean; messenger_settings: boolean; all_tickets: boolean }
 
 export type UserProfile = {
   id: number | string
@@ -11,14 +11,37 @@ export type UserProfile = {
 }
 
 export type Session = { user: UserProfile; csrf_token: string; capabilities: Capabilities }
-export type DomofonAddress = { locid: number; loctext: string }
-export type DomofonOperationResult = { ok: true; reason: string }
-export type DomofonCreatePayload = {
-  locid: number
-  field_flat: number
-  field_podezd: number
-  client_name: string
-  phone?: string
+export type PaymentAddress = { locid: number; loctext: string }
+export type PaymentProduct = { product_id: number; title: string; default_amount: string; currency: string; price_override_allowed: boolean }
+export type PaymentCandidate = { entity_type: 'contact' | 'lead'; entity_id: number; display_name: string; phone_hint?: string | null }
+export type PaymentStatus = 'draft' | 'resolving_client' | 'client_selection_required' | 'client_resolved' | 'invoice_created' | 'product_added' | 'payment_created' | 'link_created' | 'send_queued' | 'sent' | 'paid' | 'send_failed' | 'failed' | 'expired' | 'canceled'
+export type PaymentAccepted = { id: string; status: PaymentStatus }
+export type PaymentTransaction = PaymentAccepted & {
+  current_step: string
+  send_status: string | null
+  product_title: string
+  catalog_amount: string
+  actual_amount: string
+  currency: string
+  payment_url: string | null
+  payment_short_url: string | null
+  payment_qr: string | null
+  candidates: PaymentCandidate[]
+  error_code: string | null
+  error_message: string | null
+  created_at: string
+  updated_at: string
+}
+export type PaymentCreatePayload = {
+  idempotency_key: string
+  address?: PaymentAddress
+  apartment?: string
+  product_id: number
+  first_name: string
+  second_name?: string
+  last_name: string
+  phone: string
+  amount: string
 }
 export type TicketDay = 'today' | 'tomorrow'
 export type TicketComment = {
@@ -99,16 +122,23 @@ export const api = {
     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
     body: JSON.stringify({ phone }),
   }),
-  connectDomofon: (serviceLogin: string, csrfToken: string) => request<DomofonOperationResult>('/api/domofon/connect', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
-    body: JSON.stringify({ service_login: serviceLogin }),
-  }),
-  addresses: () => request<DomofonAddress[]>('/api/domofon/addresses'),
-  createDomofon: (body: DomofonCreatePayload, csrfToken: string) => request<DomofonOperationResult>('/api/domofon/create', {
+  paymentAddresses: () => request<PaymentAddress[]>('/api/payments/addresses'),
+  paymentProducts: () => request<PaymentProduct[]>('/api/payments/products'),
+  createPayment: (body: PaymentCreatePayload, csrfToken: string) => request<PaymentAccepted>('/api/payments', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
     body: JSON.stringify(body),
+  }),
+  payment: (id: string) => request<PaymentTransaction>(`/api/payments/${id}`),
+  selectPaymentClient: (id: string, candidate: PaymentCandidate, csrfToken: string) => request<PaymentTransaction>(`/api/payments/${id}/client-selection`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+    body: JSON.stringify({ entity_type: candidate.entity_type, entity_id: candidate.entity_id }),
+  }),
+  resendPayment: (id: string, csrfToken: string) => request<PaymentTransaction>(`/api/payments/${id}/resend`, {
+    method: 'POST', headers: { 'X-CSRF-Token': csrfToken },
+  }),
+  cancelPayment: (id: string, csrfToken: string) => request<PaymentTransaction>(`/api/payments/${id}/cancel`, {
+    method: 'POST', headers: { 'X-CSRF-Token': csrfToken },
   }),
   messengerLinks: () => request<MessengerLink[]>('/api/messenger-links'),
   createTelegramLink: (csrfToken: string) => request<MessengerLinkCreate>('/api/messenger-links/telegram', {

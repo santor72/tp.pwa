@@ -1,9 +1,11 @@
 import re
+from decimal import Decimal, InvalidOperation
 from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
+import phonenumbers
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
 from app.roles import UserRole, role_for_status
 
@@ -35,7 +37,7 @@ class UserProfile(BaseModel):
 
 
 class Capabilities(BaseModel):
-    domofon: bool = False
+    payments: bool = False
     messenger_settings: bool = False
     all_tickets: bool = False
 
@@ -63,50 +65,140 @@ class SessionData(BaseModel):
     absolute_expires_at: datetime
 
 
-class DomofonConnectRequest(BaseModel):
-    service_login: str = Field(min_length=1, max_length=255)
+class PaymentAddress(BaseModel):
+    locid: int = Field(gt=0)
+    loctext: str = Field(min_length=1, max_length=1000)
 
-    @field_validator("service_login")
+    @field_validator("loctext")
     @classmethod
-    def strip_login(cls, value: str) -> str:
+    def strip_address(cls, value: str) -> str:
         value = value.strip()
         if not value:
-            raise ValueError("Логин обязателен")
+            raise ValueError("Адрес обязателен")
         return value
 
 
-class DomofonCreateRequest(BaseModel):
-    locid: int = Field(strict=True)
-    field_flat: int = Field(strict=True)
-    field_podezd: int = Field(strict=True)
-    client_name: str = Field(min_length=1, max_length=255)
-    phone: str | None = Field(default=None, max_length=32)
+class PaymentProduct(BaseModel):
+    product_id: int
+    title: str
+    default_amount: Decimal
+    currency: str = "RUB"
+    price_override_allowed: bool = True
 
-    @field_validator("client_name")
+
+class PaymentCreateRequest(BaseModel):
+    idempotency_key: UUID
+    address: PaymentAddress | None = None
+    apartment: str | None = Field(default=None, max_length=64)
+    product_id: int = Field(gt=0)
+    first_name: str = Field(min_length=1, max_length=255)
+    second_name: str | None = Field(default=None, max_length=255)
+    last_name: str = Field(min_length=1, max_length=255)
+    phone: str = Field(min_length=1, max_length=64)
+    amount: Decimal
+
+    @field_validator("first_name", "last_name")
     @classmethod
-    def strip_client_name(cls, value: str) -> str:
+    def strip_required_name(cls, value: str) -> str:
         value = value.strip()
         if not value:
-            raise ValueError("ФИО обязательно")
+            raise ValueError("Поле ФИО обязательно")
         return value
+
+    @field_validator("second_name", "apartment")
+    @classmethod
+    def strip_optional(cls, value: str | None) -> str | None:
+        value = value.strip() if value else None
+        return value or None
 
     @field_validator("phone")
     @classmethod
-    def strip_optional_phone(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        value = value.strip()
-        return value or None
+    def normalize_phone(cls, value: str) -> str:
+        try:
+            number = phonenumbers.parse(value.strip(), "RU")
+        except phonenumbers.NumberParseException as exc:
+            raise ValueError("Некорректный номер телефона") from exc
+        if not phonenumbers.is_valid_number(number):
+            raise ValueError("Некорректный номер телефона")
+        return phonenumbers.format_number(number, phonenumbers.PhoneNumberFormat.E164)
+
+    @field_validator("amount", mode="before")
+    @classmethod
+    def parse_amount(cls, value: Any) -> Decimal:
+        if not isinstance(value, str):
+            raise ValueError("Сумма должна передаваться строкой")
+        try:
+            amount = Decimal(value.replace(",", ".")).quantize(Decimal("0.01"))
+        except (InvalidOperation, ValueError) as exc:
+            raise ValueError("Некорректная сумма") from exc
+        if not amount.is_finite() or amount <= 0:
+            raise ValueError("Сумма должна быть больше нуля")
+        return amount
+
+    @model_validator(mode="after")
+    def validate_address_apartment(self) -> "PaymentCreateRequest":
+        if self.address is not None and not self.apartment:
+            raise ValueError("Для выбранного адреса укажите квартиру или офис")
+        if self.address is None and self.apartment is not None:
+            raise ValueError("Квартира не передаётся без адреса")
+        return self
 
 
-class DomofonAddress(BaseModel):
-    locid: int
-    loctext: str
+class PaymentCandidate(BaseModel):
+    entity_type: Literal["contact", "lead"]
+    entity_id: int
+    display_name: str
+    phone_hint: str | None = None
 
 
-class DomofonOperationResponse(BaseModel):
-    ok: bool
-    reason: str
+class PaymentClientSelectionRequest(BaseModel):
+    entity_type: Literal["contact", "lead"]
+    entity_id: int = Field(gt=0)
+
+
+PaymentStatus = Literal[
+    "draft", "resolving_client", "client_selection_required", "client_resolved",
+    "invoice_created", "product_added", "payment_created", "link_created",
+    "send_queued", "sent", "paid", "send_failed", "failed", "expired", "canceled",
+]
+
+
+class PaymentTransactionResponse(BaseModel):
+    id: UUID
+    status: PaymentStatus
+    current_step: str
+    send_status: str | None = None
+    product_title: str
+    catalog_amount: Decimal
+    actual_amount: Decimal
+    currency: str
+    payment_url: str | None = None
+    payment_short_url: str | None = None
+    payment_qr: str | None = None
+    candidates: list[PaymentCandidate] = Field(default_factory=list)
+    error_code: str | None = None
+    error_message: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class PaymentRecentResponse(BaseModel):
+    id: UUID
+    status: PaymentStatus
+    product_title: str
+    actual_amount: Decimal
+    currency: str
+    created_at: datetime
+
+
+class PaymentAcceptedResponse(BaseModel):
+    id: UUID
+    status: PaymentStatus
+
+
+class BitrixPaymentWebhook(BaseModel):
+    event: str | None = None
+    data: dict[str, Any] = Field(default_factory=dict)
 
 
 class TechPortalAddress(BaseModel):

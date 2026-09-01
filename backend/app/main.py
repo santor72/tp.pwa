@@ -15,13 +15,8 @@ from app.capabilities import capabilities_for
 from app.dependencies import actor_from_session, get_session_store, require_csrf, require_session, verify_origin
 from app.errors import ApiError, PermissionDeniedError, SessionExpiredError
 from app.logging import audit, configure_logging, request_id_ctx, stable_hash
-from app.permissions import require_permission
 from app.roles import UserRole
 from app.schemas import (
-    DomofonAddress,
-    DomofonConnectRequest,
-    DomofonCreateRequest,
-    DomofonOperationResponse,
     DialRequest,
     ErrorResponse,
     LoginRequest,
@@ -32,6 +27,7 @@ from app.schemas import (
 from app.session_store import SessionStore
 from app.services import create_application_services
 from app.routers.messengers import router as messengers_router
+from app.routers.payments import router as payments_router
 
 settings = get_settings()
 configure_logging(settings.log_level)
@@ -47,7 +43,10 @@ async def lifespan(app: FastAPI):
     app.state.session_store = SessionStore(session_redis, settings)
     app.state.services = create_application_services(settings, cache_redis)
     app.state.auth_provider = app.state.services.auth_provider
-    app.state.domofon_service = app.state.services.domofon_service
+    app.state.payment_addresses = app.state.services.payment_addresses
+    app.state.payment_catalog = app.state.services.payment_catalog
+    app.state.payment_service = app.state.services.payment_service
+    app.state.payment_status = app.state.services.payment_status
     app.state.ticket_service = app.state.services.ticket_service
     app.state.messenger_links = app.state.services.messenger_links
     yield
@@ -58,6 +57,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
 app.include_router(messengers_router)
+app.include_router(payments_router)
 
 
 @app.middleware("http")
@@ -279,56 +279,3 @@ async def dial_subscriber(
         raise
     audit(logger, "conversations.dial.succeeded", user_id=str(actor.user_id), channel=actor.channel, result="success")
     return Response(status_code=204)
-
-
-@app.post("/api/domofon/connect", response_model=DomofonOperationResponse)
-async def domofon_connect(
-    payload: DomofonConnectRequest,
-    request: Request,
-    session_pair: tuple[str, object] = Depends(require_csrf),
-) -> DomofonOperationResponse:
-    _, session = session_pair
-    actor = await actor_from_session(request, session)
-    require_permission(actor, "client", "create")
-    try:
-        result = await request.app.state.domofon_service.connect(payload)
-    except ApiError as exc:
-        audit(logger, "domofon.connect.failed", user_id=session.user.id, result="failure", code=exc.code)
-        raise
-    audit(logger, "domofon.connect.succeeded", user_id=session.user.id, result="success")
-    return result
-
-
-@app.get("/api/domofon/addresses", response_model=list[DomofonAddress])
-async def domofon_addresses(
-    request: Request,
-    session_pair: tuple[str, object] = Depends(require_session),
-) -> list[DomofonAddress]:
-    _, session = session_pair
-    actor = await actor_from_session(request, session)
-    require_permission(actor, "client", "create")
-    try:
-        result = await request.app.state.domofon_service.addresses()
-    except ApiError as exc:
-        audit(logger, "domofon.addresses.failed", user_id=session.user.id, result="failure", code=exc.code)
-        raise
-    audit(logger, "domofon.addresses.requested", user_id=session.user.id, result="success")
-    return result
-
-
-@app.post("/api/domofon/create", response_model=DomofonOperationResponse)
-async def domofon_create(
-    payload: DomofonCreateRequest,
-    request: Request,
-    session_pair: tuple[str, object] = Depends(require_csrf),
-) -> DomofonOperationResponse:
-    _, session = session_pair
-    actor = await actor_from_session(request, session)
-    require_permission(actor, "client", "create")
-    try:
-        result = await request.app.state.domofon_service.create(payload)
-    except ApiError as exc:
-        audit(logger, "domofon.create.failed", user_id=session.user.id, result="failure", code=exc.code)
-        raise
-    audit(logger, "domofon.create.succeeded", user_id=session.user.id, result="success")
-    return result

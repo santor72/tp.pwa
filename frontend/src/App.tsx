@@ -11,8 +11,10 @@ import {
 import {
   api,
   ApiError,
-  DomofonAddress,
-  DomofonOperationResult,
+  PaymentAddress,
+  PaymentCandidate,
+  PaymentProduct,
+  PaymentTransaction,
   Session,
   MessengerLink,
   MessengerLinkCreate,
@@ -21,8 +23,8 @@ import {
 } from './api'
 
 type AppScreen = 'loading' | 'login' | 'app'
-type AppTab = TicketDay | 'domofon' | 'settings'
-type DomofonScreen = 'main' | 'connect-result' | 'addresses' | 'create-form' | 'create-result'
+type AppTab = TicketDay | 'payments' | 'settings'
+type PaymentScreen = 'address' | 'product' | 'client' | 'amount' | 'progress' | 'ambiguous' | 'result'
 const SHOW_CLOSED_TICKETS_KEY = 'tp-pwa:show-closed-tickets'
 const TICKETS_SCOPE_KEY = 'tp-pwa:tickets-scope'
 
@@ -96,6 +98,25 @@ function PhoneButton({ phone, busy, onDial }: { phone: string; busy: boolean; on
   </button>
 }
 
+function formatPaymentPhone(value: string): string {
+  let digits = value.replace(/\D/g, '')
+  if (digits.startsWith('8')) digits = `7${digits.slice(1)}`
+  if (digits && !digits.startsWith('7')) digits = `7${digits}`
+  digits = digits.slice(0, 11)
+  if (!digits) return ''
+  const national = digits.slice(1)
+  if (national.length <= 3) return `+7${national ? ` (${national}` : ''}`
+  if (national.length <= 6) return `+7 (${national.slice(0, 3)}) ${national.slice(3)}`
+  if (national.length <= 8) return `+7 (${national.slice(0, 3)}) ${national.slice(3, 6)}-${national.slice(6)}`
+  return `+7 (${national.slice(0, 3)}) ${national.slice(3, 6)}-${national.slice(6, 8)}-${national.slice(8)}`
+}
+
+function paymentPhoneE164(value: string): string {
+  let digits = value.replace(/\D/g, '')
+  if (digits.startsWith('8')) digits = `7${digits.slice(1)}`
+  return digits.startsWith('7') ? `+${digits}` : value
+}
+
 function Settings({ session }: { session: Session }) {
   const [link, setLink] = useState<MessengerLink | null>(null)
   const [created, setCreated] = useState<MessengerLinkCreate | null>(null)
@@ -137,30 +158,24 @@ function Settings({ session }: { session: Session }) {
   </section>
 }
 
-function ResultCard({ title, result, onBack }: { title: string; result: DomofonOperationResult; onBack: () => void }) {
-  return (
-    <section className="step-content">
-      <div className="step-heading"><h1>{title}</h1></div>
-      <div className="panel result-panel">
-        <div className="success-icon">✓</div>
-        <div><strong>Операция выполнена</strong><p>{result.reason}</p></div>
-      </div>
-      <button className="primary-button" onClick={onBack}>На главную</button>
-    </section>
-  )
-}
+const ACTIVE_PAYMENT_KEY = 'tp-pwa:active-payment'
 
-function Domofon({ session }: { session: Session }) {
-  const [screen, setScreen] = useState<DomofonScreen>('main')
-  const [serviceLogin, setServiceLogin] = useState('')
-  const [locations, setLocations] = useState<DomofonAddress[]>([])
-  const [selectedLocation, setSelectedLocation] = useState<DomofonAddress | null>(null)
+function Payments({ session }: { session: Session }) {
+  const [screen, setScreen] = useState<PaymentScreen>('address')
+  const [locations, setLocations] = useState<PaymentAddress[]>([])
+  const [products, setProducts] = useState<PaymentProduct[]>([])
+  const [selectedLocation, setSelectedLocation] = useState<PaymentAddress | null>(null)
+  const [selectedProduct, setSelectedProduct] = useState<PaymentProduct | null>(null)
   const [locationSearch, setLocationSearch] = useState('')
-  const [flat, setFlat] = useState('')
-  const [entrance, setEntrance] = useState('')
-  const [clientName, setClientName] = useState('')
+  const [apartment, setApartment] = useState('')
+  const [firstName, setFirstName] = useState('')
+  const [secondName, setSecondName] = useState('')
+  const [lastName, setLastName] = useState('')
   const [phone, setPhone] = useState('')
-  const [result, setResult] = useState<DomofonOperationResult | null>(null)
+  const [amount, setAmount] = useState('')
+  const [transactionId, setTransactionId] = useState<string | null>(() => sessionStorage.getItem(ACTIVE_PAYMENT_KEY))
+  const [transaction, setTransaction] = useState<PaymentTransaction | null>(null)
+  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -169,28 +184,61 @@ function Domofon({ session }: { session: Session }) {
     return query ? locations.filter(item => item.loctext.toLocaleLowerCase('ru').includes(query)) : locations
   }, [locationSearch, locations])
 
+  useEffect(() => {
+    let active = true
+    api.paymentAddresses().then(value => { if (active) setLocations(value) }).catch(cause => { if (active) setError(errorMessage(cause)) })
+    return () => { active = false }
+  }, [])
+
+  useEffect(() => {
+    if (!transactionId) return
+    sessionStorage.setItem(ACTIVE_PAYMENT_KEY, transactionId)
+    let active = true
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const poll = async () => {
+      try {
+        const value = await api.payment(transactionId)
+        if (!active) return
+        setTransaction(value)
+        setError('')
+        if (value.status === 'client_selection_required') setScreen('ambiguous')
+        else if (value.payment_short_url || value.payment_url || ['send_failed', 'send_queued', 'sent', 'paid', 'failed', 'expired', 'canceled'].includes(value.status)) setScreen('result')
+        else setScreen('progress')
+        if (!['paid', 'failed', 'expired', 'canceled'].includes(value.status)) timer = setTimeout(poll, 2500)
+      } catch (cause) {
+        if (active) { setError(errorMessage(cause)); timer = setTimeout(poll, 4000) }
+      }
+    }
+    poll()
+    return () => { active = false; if (timer) clearTimeout(timer) }
+  }, [transactionId])
+
   function reset() {
-    setScreen('main')
-    setServiceLogin('')
-    setLocations([])
+    setScreen('address')
     setSelectedLocation(null)
+    setSelectedProduct(null)
     setLocationSearch('')
-    setFlat('')
-    setEntrance('')
-    setClientName('')
+    setApartment('')
+    setFirstName('')
+    setSecondName('')
+    setLastName('')
     setPhone('')
-    setResult(null)
+    setAmount('')
+    setTransaction(null)
+    setTransactionId(null)
+    setIdempotencyKey(crypto.randomUUID())
+    sessionStorage.removeItem(ACTIVE_PAYMENT_KEY)
     setError('')
   }
 
-  async function connect(event: FormEvent) {
-    event.preventDefault()
+  async function openProducts(address: PaymentAddress | null) {
     setLoading(true)
     setError('')
     try {
-      const response = await api.connectDomofon(serviceLogin.trim(), session.csrf_token)
-      setResult(response)
-      setScreen('connect-result')
+      setSelectedLocation(address)
+      setApartment('')
+      if (products.length === 0) setProducts(await api.paymentProducts())
+      setScreen('product')
     } catch (cause) {
       setError(errorMessage(cause))
     } finally {
@@ -198,40 +246,27 @@ function Domofon({ session }: { session: Session }) {
     }
   }
 
-  async function openAddresses() {
-    setLoading(true)
-    setError('')
-    try {
-      setLocations(await api.addresses())
-      setScreen('addresses')
-    } catch (cause) {
-      setError(errorMessage(cause))
-    } finally {
-      setLoading(false)
-    }
+  function chooseProduct(product: PaymentProduct) {
+    setSelectedProduct(product)
+    setAmount(product.default_amount)
+    setScreen('client')
   }
 
-  async function createUser(event: FormEvent) {
+  async function submit(event: FormEvent) {
     event.preventDefault()
-    if (!selectedLocation) return
-    const flatNumber = Number(flat)
-    const entranceNumber = Number(entrance)
-    if (!Number.isInteger(flatNumber) || !Number.isInteger(entranceNumber)) {
-      setError('Квартира и подъезд должны быть целыми числами')
-      return
-    }
+    if (!selectedProduct) return
     setLoading(true)
     setError('')
     try {
-      const response = await api.createDomofon({
-        locid: selectedLocation.locid,
-        field_flat: flatNumber,
-        field_podezd: entranceNumber,
-        client_name: clientName.trim(),
-        ...(phone.trim() ? { phone: phone.trim() } : {}),
+      const response = await api.createPayment({
+        idempotency_key: idempotencyKey,
+        ...(selectedLocation ? { address: selectedLocation, apartment: apartment.trim() } : {}),
+        product_id: selectedProduct.product_id,
+        first_name: firstName.trim(), second_name: secondName.trim() || undefined,
+        last_name: lastName.trim(), phone: paymentPhoneE164(phone), amount: amount.replace(',', '.'),
       }, session.csrf_token)
-      setResult(response)
-      setScreen('create-result')
+      setTransactionId(response.id)
+      setScreen('progress')
     } catch (cause) {
       setError(errorMessage(cause))
     } finally {
@@ -239,71 +274,106 @@ function Domofon({ session }: { session: Session }) {
     }
   }
 
-  let content: React.ReactNode
+  async function selectCandidate(candidate: PaymentCandidate) {
+    if (!transactionId) return
+    setLoading(true); setError('')
+    try { setTransaction(await api.selectPaymentClient(transactionId, candidate, session.csrf_token)); setScreen('progress') }
+    catch (cause) { setError(errorMessage(cause)) }
+    finally { setLoading(false) }
+  }
 
-  if (screen === 'connect-result' && result) {
-    content = <ResultCard title="Услуга подключена" result={result} onBack={reset} />
-  } else if (screen === 'create-result' && result) {
-    content = <ResultCard title="Пользователь создан" result={result} onBack={reset} />
-  } else if (screen === 'addresses') {
-    content = (
+  async function resend() {
+    if (!transactionId) return
+    setLoading(true); setError('')
+    try { setTransaction(await api.resendPayment(transactionId, session.csrf_token)) }
+    catch (cause) { setError(errorMessage(cause)) }
+    finally { setLoading(false) }
+  }
+
+  async function cancelPayment() {
+    if (!transactionId || !window.confirm('Отменить оплату и сделать ссылку недействительной?')) return
+    setLoading(true); setError('')
+    try { setTransaction(await api.cancelPayment(transactionId, session.csrf_token)) }
+    catch (cause) { setError(errorMessage(cause)) }
+    finally { setLoading(false) }
+  }
+
+  if (screen === 'address') {
+    return (
       <section className="step-content">
-        <div className="step-heading with-back">
-          <button className="icon-button" aria-label="Назад" onClick={reset}><BackIcon /></button>
-          <div><h1>Выберите адрес</h1><p>Дом, в котором создаётся пользователь</p></div>
-        </div>
+        <div className="step-heading"><h1>Оплата</h1><p>Шаг 1 из 4 · выберите адрес клиента</p></div>
         <input className="search-input" type="search" placeholder="Поиск по адресу" value={locationSearch} onChange={event => setLocationSearch(event.target.value)} />
+        <button className="outline-button" disabled={loading} onClick={() => openProducts(null)}>{loading ? 'Загрузка…' : 'Пропустить адрес'}</button>
+        {error && <ErrorBox text={error} />}
         <div className="location-grid">
           {visibleLocations.map(location => (
-            <button className="location-card" key={location.locid} onClick={() => { setSelectedLocation(location); setError(''); setScreen('create-form') }}>
+            <button className="location-card" key={location.locid} onClick={() => openProducts(location)}>
               <span className="location-icon"><LocationIcon /></span>
               <strong>{location.loctext}</strong>
-              <small>ID: {location.locid}</small>
             </button>
           ))}
         </div>
         {visibleLocations.length === 0 && <div className="panel empty-state">Адреса не найдены</div>}
       </section>
     )
-  } else if (screen === 'create-form' && selectedLocation) {
-    content = (
+  }
+  if (screen === 'product') {
+    return (
       <section className="step-content">
         <div className="step-heading with-back">
-          <button className="icon-button" aria-label="Назад" onClick={() => { setError(''); setScreen('addresses') }}><BackIcon /></button>
-          <div><h1>Новый пользователь</h1><p>{selectedLocation.loctext}</p></div>
+          <button className="icon-button" aria-label="Назад" onClick={() => setScreen('address')}><BackIcon /></button>
+          <div><h1>Выберите услугу</h1><p>Шаг 2 из 4</p></div>
         </div>
-        <form className="panel create-form" onSubmit={createUser}>
-          <div className="field-row">
-            <Field label="Квартира" required><input type="number" step="1" inputMode="numeric" value={flat} onChange={event => setFlat(event.target.value)} required /></Field>
-            <Field label="Подъезд" required><input type="number" step="1" inputMode="numeric" value={entrance} onChange={event => setEntrance(event.target.value)} required /></Field>
-          </div>
-          <Field label="ФИО" required><input value={clientName} onChange={event => setClientName(event.target.value)} autoComplete="name" required /></Field>
-          <Field label="Номер телефона"><input type="tel" value={phone} onChange={event => setPhone(event.target.value)} autoComplete="tel" placeholder="+7 999 123-45-67" /></Field>
-          {error && <ErrorBox text={error} />}
-          <button className="primary-button" disabled={loading}>{loading ? 'Создание…' : 'Создать пользователя'}</button>
-        </form>
-      </section>
-    )
-  } else {
-    content = (
-      <section className="step-content">
-        <div className="step-heading"><h1>Домофоны</h1><p>Подключение услуги и создание пользователей</p></div>
-        <form className="panel" onSubmit={connect}>
-          <Field label="Логин клиента">
-            <input value={serviceLogin} onChange={event => setServiceLogin(event.target.value)} placeholder="Введите логин" required />
-          </Field>
-          <button className="primary-button" disabled={loading || !serviceLogin.trim()}>{loading ? 'Подключение…' : 'Подключить услугу'}</button>
-        </form>
-        <div className="divider"><span>или</span></div>
-        <button className="outline-button" disabled={loading} onClick={openAddresses}>
-          <span>＋</span>{loading ? 'Загрузка адресов…' : 'Создать нового пользователя'}
-        </button>
-        {error && <ErrorBox text={error} />}
+        <div className="product-grid">{products.map(product => <button className="panel product-card" key={product.product_id} onClick={() => chooseProduct(product)}><strong>{product.title}</strong><span>{product.default_amount} {product.currency}</span></button>)}</div>
+        {products.length === 0 && <div className="panel empty-state">Нет доступных услуг</div>}
       </section>
     )
   }
-
-  return content
+  if (screen === 'client' && selectedProduct) {
+    return (
+      <section className="step-content">
+        <div className="step-heading with-back"><button className="icon-button" aria-label="Назад" onClick={() => setScreen('product')}><BackIcon /></button><div><h1>Данные клиента</h1><p>Шаг 3 из 4</p></div></div>
+        <form className="panel create-form" onSubmit={event => { event.preventDefault(); setScreen('amount') }}>
+          <div className="field-row"><Field label="Фамилия" required><input value={lastName} onChange={event => setLastName(event.target.value)} autoComplete="family-name" required /></Field><Field label="Имя" required><input value={firstName} onChange={event => setFirstName(event.target.value)} autoComplete="given-name" required /></Field></div>
+          <Field label="Отчество"><input value={secondName} onChange={event => setSecondName(event.target.value)} autoComplete="additional-name" /></Field>
+          <Field label="Телефон" required><input type="tel" value={phone} onChange={event => setPhone(formatPaymentPhone(event.target.value))} autoComplete="tel" inputMode="tel" pattern={String.raw`\+7 \(\d{3}\) \d{3}-\d{2}-\d{2}`} title="Введите номер в формате +7 (999) 123-45-67" placeholder="+7 (999) 123-45-67" maxLength={18} required /></Field>
+          {selectedLocation && <Field label="Квартира / офис" required><input value={apartment} onChange={event => setApartment(event.target.value)} placeholder="42, 12А или офис 3" required /></Field>}
+          <button className="primary-button">Продолжить</button>
+        </form>
+      </section>
+    )
+  }
+  if (screen === 'amount' && selectedProduct) {
+    return (
+      <section className="step-content">
+        <div className="step-heading with-back"><button className="icon-button" aria-label="Назад" onClick={() => setScreen('client')}><BackIcon /></button><div><h1>Сумма и подтверждение</h1><p>Шаг 4 из 4</p></div></div>
+        <form className="panel create-form" onSubmit={submit}>
+          <div className="payment-summary"><strong>{selectedProduct.title}</strong><span>{lastName} {firstName} {secondName}</span><span>{phone}</span><span>{selectedLocation ? `${selectedLocation.loctext}, ${apartment}` : 'Без адреса'}</span></div>
+          <Field label={`Сумма, ${selectedProduct.currency}`} required><input inputMode="decimal" value={amount} onChange={event => setAmount(event.target.value)} readOnly={!selectedProduct.price_override_allowed} required /></Field>
+          {error && <ErrorBox text={error} />}
+          <button className="primary-button" disabled={loading}>{loading ? 'Формирование…' : 'Сформировать оплату'}</button>
+        </form>
+      </section>
+    )
+  }
+  if (screen === 'ambiguous' && transaction) {
+    return <section className="step-content"><div className="step-heading"><h1>Уточните клиента</h1><p>Найдено несколько совпадений</p></div>{error && <ErrorBox text={error} />}<div className="product-grid">{transaction.candidates.map(candidate => <button className="panel product-card" disabled={loading} key={`${candidate.entity_type}-${candidate.entity_id}`} onClick={() => selectCandidate(candidate)}><strong>{candidate.display_name}</strong><span>{candidate.entity_type === 'contact' ? 'Контакт' : 'Лид'}</span></button>)}</div></section>
+  }
+  if (screen === 'result' && transaction) {
+    const link = transaction.payment_short_url || transaction.payment_url
+    const paid = transaction.status === 'paid'
+    const stopped = ['failed', 'expired', 'canceled'].includes(transaction.status)
+    const heading = paid ? 'Оплата получена' : stopped && !link ? 'Оплата не сформирована' : 'Ссылка сформирована'
+    const notice = paid
+      ? 'Битрикс24 подтвердил оплату'
+      : stopped && !link
+        ? transaction.error_message || 'Операция остановлена. Сообщите администратору её ID.'
+        : transaction.status === 'send_failed'
+          ? 'SMS не настроено — передайте ссылку клиенту'
+          : 'Ссылка поставлена в очередь отправки'
+    return <section className="step-content"><div className="step-heading"><h1>{heading}</h1><p>{transaction.product_title} · {transaction.actual_amount} {transaction.currency}</p></div>{error && <ErrorBox text={error} />}<div className="panel payment-result"><div className="success-icon">{paid ? '✓' : stopped && !link ? '!' : '₽'}</div><strong>{notice}</strong>{stopped && !link && <small>ID операции: {transaction.id}</small>}{transaction.payment_qr && <img className="payment-qr" src={transaction.payment_qr} alt="QR-код оплаты" />}{link && <a className="payment-link" href={link} target="_blank" rel="noreferrer">Открыть ссылку на оплату</a>}</div>{!paid && link && <button className="outline-button" disabled={loading} onClick={resend}>{loading ? 'Отправка…' : 'Отправить повторно'}</button>}{!paid && !stopped && <button className="outline-button danger-button" disabled={loading} onClick={cancelPayment}>Отменить оплату</button>}<button className="primary-button" onClick={reset}>Новая оплата</button></section>
+  }
+  return <section className="step-content"><div className="step-heading"><h1>Формируем оплату</h1><p>Не закрывайте экран</p></div>{error && <ErrorBox text={error} />}<div className="panel payment-progress"><span className="spinner" aria-hidden="true" /><strong>{transaction?.current_step === 'resolving_client' ? 'Ищем клиента…' : transaction?.current_step === 'invoice_created' ? 'Добавляем товар…' : transaction?.current_step === 'product_added' ? 'Создаём оплату…' : transaction?.current_step === 'payment_created' ? 'Формируем ссылку…' : 'Создаём платёжный документ…'}</strong></div></section>
 }
 
 function formatDateTime(value: string | null): string {
@@ -637,7 +707,7 @@ function Tickets({ day, session }: { day: TicketDay; session: Session }) {
 
 function AppShell({ session, onLogout }: { session: Session; onLogout: () => void }) {
   const [tab, setTab] = useState<AppTab>('today')
-  const domofonAllowed = session.capabilities.domofon
+  const paymentsAllowed = session.capabilities.payments
   const messengerSettingsAllowed = session.capabilities.messenger_settings
   const ticketDay: TicketDay = tab === 'today' || tab === 'tomorrow' ? tab : 'today'
   return (
@@ -648,13 +718,13 @@ function AppShell({ session, onLogout }: { session: Session; onLogout: () => voi
       </header>
       {tab === 'settings' && messengerSettingsAllowed
         ? <Settings session={session} />
-        : tab === 'domofon' && domofonAllowed
-        ? <Domofon session={session} />
+        : tab === 'payments' && paymentsAllowed
+        ? <Payments session={session} />
         : <Tickets key={ticketDay} day={ticketDay} session={session} />}
       <nav className="bottom-nav" aria-label="Основные разделы">
         <button className={tab === 'today' ? 'active' : ''} onClick={() => setTab('today')} aria-label="Сегодня" title="Сегодня"><span aria-hidden="true">●</span></button>
         <button className={tab === 'tomorrow' ? 'active' : ''} onClick={() => setTab('tomorrow')} aria-label="Завтра" title="Завтра"><span aria-hidden="true">◐</span></button>
-        {domofonAllowed && <button className={tab === 'domofon' ? 'active' : ''} onClick={() => setTab('domofon')} aria-label="Домофон" title="Домофон"><span aria-hidden="true">⌂</span></button>}
+        {paymentsAllowed && <button className={tab === 'payments' ? 'active' : ''} onClick={() => setTab('payments')} aria-label="Оплата" title="Оплата"><span aria-hidden="true">₽</span></button>}
         {messengerSettingsAllowed && <button className={tab === 'settings' ? 'active' : ''} onClick={() => setTab('settings')} aria-label="Настройки" title="Настройки"><span aria-hidden="true">⚙</span></button>}
       </nav>
     </main>

@@ -2,7 +2,7 @@
 
 PWA для разъездных специалистов. Текущая версия реализует авторизацию через
 ТехПортал, собственные Redis-сессии, экраны заявок «Сегодня» и «Завтра»,
-структурированные аудит-логи и рабочие сценарии раздела «Домофоны» через ESB.
+структурированные аудит-логи и платёжный терминал на базе Bitrix24.
 
 Инструкция для специалистов: [`docs/user-guide.md`](docs/user-guide.md) или
 [`docs/user-guide.html`](docs/user-guide.html).
@@ -19,8 +19,10 @@ PWA для разъездных специалистов. Текущая вер�
    `TP_PASSWORD` нужны только для ручной проверки авторизации; приложение
    получает учётные данные пользователя из формы входа. Для заявок обязательны
    `TP_BASE_URL` (полный базовый путь API, например `/api/ext`) и
-   `TP_BASE_TOKEN`. Для Домофонов обязательны `ESB_BASE_URL` и
-   `ESB_BASE_TOKEN`. Для Telegram обязательны `TELEGRAM_BOT_TOKEN`,
+   `TP_BASE_TOKEN`. Справочник адресов использует `ESB_BASE_URL` и
+   `ESB_BASE_TOKEN`. Для платежей обязательны `BX24_WEBHOOK`, непустой
+   `BX24_PAYMENT_PRODUCTS`, активная платёжная система Bitrix24 и настройки
+   суммы из `.env.example`. Для Telegram обязательны `TELEGRAM_BOT_TOKEN`,
    `TELEGRAM_BOT_USERNAME`, `TG_ACCESS_GROUPS` и `HTTPS_PROXY`. Long polling
    бота не запускается без `HTTPS_PROXY`; он применяется ко всем обращениям к
    Telegram API.
@@ -70,7 +72,8 @@ curl http://127.0.0.1:8081/health/ready
 - `frontend` — Nginx со статической PWA и reverse proxy `/api`;
 - `api` — FastAPI;
 - `telegram-bot` — единственный aiogram long-polling процесс без публичного порта;
-- `postgres` — постоянные пользователи, привязки мессенджеров и одноразовые ссылки;
+- `payment-worker` — продолжение платёжных операций и резервная проверка статуса;
+- `postgres` — пользователи, привязки мессенджеров и платёжные транзакции;
 - `migrate` — одноразово выполняет Alembic-миграции до запуска API и бота;
 - `redis` — DB 0 для сессий, DB 1 для кэша, DB 2 для Telegram FSM/access;
 - `vector` — читает Docker logs и выводит JSON в console sink.
@@ -83,9 +86,14 @@ curl http://127.0.0.1:8081/health/ready
 - `GET /api/tickets/today`
 - `GET /api/tickets/tomorrow`
 - `POST /api/tickets/{ticket_id}/completion`
-- `POST /api/domofon/connect`
-- `GET /api/domofon/addresses`
-- `POST /api/domofon/create`
+- `GET /api/payments/addresses`
+- `GET /api/payments/products`
+- `POST /api/payments`
+- `GET /api/payments/{transaction_id}`
+- `POST /api/payments/{transaction_id}/client-selection`
+- `POST /api/payments/{transaction_id}/resend`
+- `GET /api/payments/recent`
+- `POST /api/webhooks/bitrix24/payments`
 - `GET /api/messenger-links`
 - `POST /api/messenger-links/telegram`
 - `DELETE /api/messenger-links/telegram`
@@ -96,14 +104,15 @@ Backend использует:
 - `GET /techportal-user/list` для авторов комментариев;
 - `POST /tickets/persist` для установки и снятия тега
   `Работы произведены`;
-- `GET /locations` для адресов;
-- `POST /add-domofon-to-user` для подключения услуги;
-- `GET /flat-search` перед созданием пользователя;
-- `POST /domofon-new-user` для создания пользователя.
+- `GET /locations` в ESB для справочника адресов;
+- REST Bitrix24 для каталога, контактов/лидов, CRM-счетов, товаров, платежей,
+  публичной ссылки и timeline.
 
-Ответы ESB нормализуются, а внутренние поля квартиры и секреты не передаются
-frontend. Без `ESB_BASE_URL` и `ESB_BASE_TOKEN` маршруты Домофона возвращают
-`503 ESB_NOT_CONFIGURED`; успешные ответы не имитируются.
+Платёж не связан с заявкой. Frontend создаёт ключ идемпотентности один раз,
+backend сохраняет каждый подтверждённый внешний шаг в PostgreSQL, а worker
+продолжает операцию после сбоев. Источник статуса `paid` — повторное чтение
+платежа Bitrix24 после webhook `OnPaymentEntitySaved` либо резервный polling.
+Полные телефоны, webhook и платёжные ссылки не журналируются.
 
 Заявки по умолчанию фильтруются по ID исполнителя из серверной сессии. Режим
 `?scope=all` доступен только пользователям с соответствующей capability. Даты фильтра
@@ -148,3 +157,33 @@ docker run --rm techportal-frontend-test pnpm test
 - Для отката миграции сначала остановите API и bot, затем выполните
   `docker compose run --rm migrate alembic -c alembic.ini downgrade -1`.
   Перед откатом production-БД создайте резервную копию.
+
+## Платёжный runbook
+
+- При ротации `BX24_WEBHOOK` замените значение в `.env` и пересоздайте `api` и
+  `payment-worker`; старое значение отзовите в Bitrix24.
+- Зависшую операцию безопасно продолжает worker с последнего сохранённого шага.
+  Повторный пользовательский `POST` должен содержать исходный
+  `idempotency_key`; новый ключ означает новую оплату.
+- До production проверьте активную платёжную систему, онлайн-кассу, поле
+  `BX24_PAYMENT_LINK_FIELD`, робот по `BX24_PAYMENT_SEND_TRIGGER` и внешний
+  webhook с секретом `BX24_PAYMENT_WEBHOOK_TOKEN`.
+- Если SMS не настроено, операция остаётся в `send_failed`, а короткая ссылка и
+  QR доступны сотруднику; успешная отправка не симулируется.
+- Для события `OnPaymentEntitySaved` используйте endpoint
+  `/api/webhooks/bitrix24/payments`. Значение Bitrix24
+  `auth[application_token]` должно совпадать с `BX24_PAYMENT_WEBHOOK_TOKEN`;
+  секрет должен отличаться от REST webhook и храниться только на сервере.
+- `event.bind` регистрируется из OAuth-контекста Bitrix24, а не входящим REST
+  webhook. При deployment укажите публичный HTTPS URL
+  `https://<домен>/api/webhooks/bitrix24/payments`; polling остаётся резервным
+  способом подтверждения оплаты.
+- После отправки SMS робот должен перевести счёт со стадии
+  `BX24_PAYMENT_SEND_TRIGGER` на следующую стадию. Иначе «Отправить повторно»
+  может не вызвать робота повторно.
+- Окончательно неуспешную операцию может возобновить только администратор через
+  `POST /api/admin/payments/{transaction_id}/resume`; действие сохраняется в
+  журнале операций.
+- Настройте внешний мониторинг `/health/ready` и alert по событиям логов
+  `payment.worker.failed`, `BX24_RATE_LIMITED` и операциям в статусе `failed`.
+  Платёжные ссылки, телефоны и webhook-секреты не должны передаваться в alert.

@@ -223,6 +223,6 @@ async def test_completion_preserves_card_for_sparse_persist_response() -> None:
 
 def test_phone_normalization_deduplicates_equivalent_numbers_and_keeps_unparseable_values() -> None:
     source = ticket()
-    source.phones = ["+7 925 545-59-58", "неизвестный", "неизвестный"]
+    source.phones = ["+7 925 455-39-58", "неизвестный", "неизвестный"]
 
     assert TicketService._phones(source) == ["+79254553958", "неизвестный"]

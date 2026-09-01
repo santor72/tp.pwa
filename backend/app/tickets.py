@@ -196,6 +196,8 @@ class TicketService:
                 continue
             phone = value.strip()
             try:
+                if not any(character.isdigit() for character in phone):
+                    raise phonenumbers.NumberParseException(phonenumbers.NumberParseException.NOT_A_NUMBER, "no digits")
                 phone = phonenumbers.format_number(
                     phonenumbers.parse(phone, "RU"),
                     phonenumbers.PhoneNumberFormat.E164,

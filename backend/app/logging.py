@@ -19,6 +19,13 @@ SENSITIVE_KEYS = frozenset(
         "token",
         "client_name",
         "phone",
+        "phone_normalized",
+        "payment_url",
+        "payment_short_url",
+        "payment_qr",
+        "bx24_webhook",
+        "bx24_payment_webhook_token",
+        "application_token",
         "set-cookie",
     }
 )

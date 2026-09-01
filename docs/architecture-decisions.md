@@ -4,7 +4,7 @@
 
 Приложение предназначено для разъездных специалистов интернет-оператора.
 На текущем этапе разрабатывается PWA с авторизацией через учётную запись
-ТехПортала и рабочим разделом «Домофон».
+ТехПортала, заявками и самостоятельным платёжным терминалом Bitrix24.
 
 ## Границы текущего этапа
 
@@ -14,7 +14,7 @@
 - авторизация пользователя через ТехПортал;
 - собственная серверная сессия приложения;
 - обработка истечения и отзыва пользовательской сессии;
-- раздел «Домофон»;
+- раздел «Оплата»;
 - заявки на сегодня и завтра;
 - backend-интеграция с REST API;
 - структурированное логирование входов и действий пользователя;
@@ -24,9 +24,8 @@
 
 Не входят в текущий этап:
 
-- подключение услуг;
 - работа с оборудованием;
-- Telegram-бот и другие пользовательские адаптеры.
+- другие пользовательские адаптеры помимо реализованного Telegram-бота.
 
 Telegram-бот принят как следующий этап после PWA. Архитектура общей
 подсистемы мессенджеров и Telegram-адаптера зафиксирована в
@@ -49,11 +48,13 @@ Python middleware
  ├── собственные серверные сессии в Redis
  ├── кэширующий слой Redis
  ├── адаптер заявок ТехПортала
- └── backend-адаптер ESB API
-          │
-          │ Authorization: Bearer <ESB_BASE_TOKEN>
-          ▼
-          ESB
+ ├── ESB: read-only справочник адресов
+ ├── PostgreSQL: пользователи и платёжные транзакции
+ └── Bitrix24 REST: CRM, каталог, счёт, оплата и публичная ссылка
+
+Payment worker
+ ├── продолжает незавершённые шаги
+ └── подтверждает оплату через Bitrix24 webhook/polling
 
 Python middleware ── JSON logs в stdout ── Docker ── Vector ── внешнее хранилище
 ```
@@ -201,11 +202,16 @@ REST API.
 - `GET /api/auth/session`
 - `POST /api/auth/logout`
 
-### Домофон
+### Платежи
 
-- `POST /api/domofon/connect`
-- `GET /api/domofon/addresses`
-- `POST /api/domofon/create`
+- `GET /api/payments/addresses`
+- `GET /api/payments/products`
+- `POST /api/payments`
+- `GET /api/payments/{transaction_id}`
+- `POST /api/payments/{transaction_id}/client-selection`
+- `POST /api/payments/{transaction_id}/resend`
+- `GET /api/payments/recent`
+- `POST /api/webhooks/bitrix24/payments`
 
 ### Заявки
 
@@ -219,29 +225,29 @@ ID исполнителя берётся из серверной сессии. B
 пользователю заявку и отправляет в `tickets/persist` полный набор тегов.
 Временные метки UTC преобразуются в `Europe/Moscow`.
 
-Точные структуры запросов и ответов фиксируются до реализации адаптера.
-Внутренний API не должен передавать frontend необработанные ответы внешней
-системы.
-
-Запрос создания пользователя домофона содержит выбранный адрес, квартиру,
-подъезд, ФИО и телефон клиента:
+Внутренний API не передаёт frontend необработанные ответы внешней системы.
+Запрос создания платёжной операции содержит ключ идемпотентности, выбранный
+товар, клиента, сумму и необязательный адрес:
 
 ```json
 {
-  "locid": 123,
-  "field_flat": 42,
-  "field_podezd": 3,
-  "client_name": "Иванов Иван Иванович",
-  "phone": "+79990000000"
+  "idempotency_key": "UUID",
+  "address": {"locid": 123, "loctext": "Полный адрес"},
+  "apartment": "42",
+  "product_id": 123,
+  "first_name": "Иван",
+  "last_name": "Иванов",
+  "phone": "+79990000000",
+  "amount": "1500.00"
 }
 ```
 
-Поля `locid`, `field_flat`, `field_podezd` и `client_name` обязательны.
-`service_login` и `client_name` — непустые строки. `field_flat` и
-`field_podezd` — целые числа. `phone` — необязательная строка: пустое значение
-не включается в запрос ESB.
-`client_name` и `phone` содержат персональные данные: их нельзя выводить в
-технические журналы целиком без необходимости.
+Платёж не связан с заявкой. Точное разрешение контакта/лида, маппинг адреса,
+состояния восстановления и Bitrix24-вызовы описаны в
+[`payments-implementation-plan.md`](payments-implementation-plan.md).
+
+ФИО и телефон клиента являются персональными данными: их нельзя выводить в
+технические журналы целиком. Платёжные ссылки также считаются чувствительными.
 
 Рекомендуемая модель адреса:
 
@@ -349,7 +355,7 @@ API закрывает доступ и возвращает безопасную
 {
   "timestamp": "2026-07-28T12:00:00.000Z",
   "level": "INFO",
-  "event": "domofon.create.succeeded",
+  "event": "payment.worker.failed",
   "request_id": "01...",
   "user_id": 123,
   "result": "success",
@@ -365,9 +371,9 @@ API закрывает доступ и возвращает безопасную
 - `auth.logout`;
 - `auth.session.expired`;
 - `auth.session.revoked`;
-- `domofon.connect.succeeded` и `domofon.connect.failed`;
-- `domofon.addresses.requested` и `domofon.addresses.failed`;
-- `domofon.create.succeeded` и `domofon.create.failed`;
+- создание локальной платёжной операции;
+- переходы внешних шагов в `payment_transaction_events`;
+- ошибки worker без телефона, webhook и платёжной ссылки;
 - `esb.auth.failed`;
 - ошибки Redis и внешних REST API.
 

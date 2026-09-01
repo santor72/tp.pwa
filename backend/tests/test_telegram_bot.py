@@ -7,7 +7,7 @@ from app.telegram_bot import create_bot, validate_bot_settings
 
 
 def test_bot_requires_proxy_for_long_polling() -> None:
-    settings = Settings(telegram_bot_token="123:abc", tg_access_groups="-1001")
+    settings = Settings(telegram_bot_token="123:abc", tg_access_groups="-1001", https_proxy="")
     with pytest.raises(RuntimeError, match="HTTPS_PROXY"):
         validate_bot_settings(settings)
 

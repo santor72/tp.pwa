@@ -5,8 +5,11 @@ services:
     restart: unless-stopped
     environment:
       SESSION_COOKIE_SECURE: "true"
+      PAYMENT_ADDRESSES_CACHE_TTL_SECONDS: ${PAYMENT_ADDRESSES_CACHE_TTL_SECONDS:-300}
       ALLOWED_ORIGINS: "https://pwa.example.ru"
   telegram-bot:
+    restart: unless-stopped
+  payment-worker:
     restart: unless-stopped
   redis:
     restart: unless-stopped

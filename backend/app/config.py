@@ -1,12 +1,14 @@
 from functools import lru_cache
 from urllib.parse import urlsplit
 
-from pydantic import AliasChoices, Field, field_validator
+from decimal import Decimal
+
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", populate_by_name=True)
 
     app_name: str = "ТехПортал PWA API"
     log_level: str = "INFO"
@@ -41,7 +43,29 @@ class Settings(BaseSettings):
     esb_base_url: str = ""
     esb_base_token: str = ""
     esb_timeout_seconds: float = Field(default=20.0, gt=0)
-    domofon_addresses_cache_ttl_seconds: int = Field(default=300, gt=0)
+    payment_addresses_cache_ttl_seconds: int = Field(
+        default=300,
+        gt=0,
+        validation_alias=AliasChoices("PAYMENT_ADDRESSES_CACHE_TTL_SECONDS", "DOMOFON_ADDRESSES_CACHE_TTL_SECONDS"),
+    )
+
+    bx24_webhook: SecretStr = SecretStr("")
+    bx24_payment_products: dict[str, int] = Field(default_factory=dict)
+    bx24_price_group_id: int = Field(default=2, gt=0)
+    bx24_new_lead_status_id: str = "NEW"
+    bx24_payment_currency: str = "RUB"
+    bx24_payment_min_amount: Decimal = Field(default=Decimal("1.00"), gt=0)
+    bx24_payment_max_amount: Decimal = Field(default=Decimal("1000000.00"), gt=0)
+    bx24_payment_allow_price_override: bool = True
+    bx24_payment_link_field: str = ""
+    bx24_payment_send_trigger: str = ""
+    bx24_payment_webhook_token: SecretStr = SecretStr("")
+    bx24_payment_poll_interval_seconds: int = Field(default=30, gt=0)
+    bx24_payment_expires_seconds: int = Field(default=86400, gt=0)
+    bx24_payment_catalog_cache_ttl_seconds: int = Field(default=300, gt=0)
+    bx24_timeout_seconds: float = Field(default=20.0, gt=0)
+    bx24_worker_batch_size: int = Field(default=10, gt=0, le=100)
+    bx24_worker_max_retries: int = Field(default=8, ge=0, le=50)
 
     allowed_origins: str = "http://localhost:8080"
 
@@ -54,6 +78,47 @@ class Settings(BaseSettings):
         if value and urlsplit(value).scheme not in {"http", "https"}:
             raise ValueError("ESB_BASE_URL должен использовать http:// или https://")
         return value
+
+    @field_validator("bx24_webhook")
+    @classmethod
+    def validate_bx24_webhook(cls, value: SecretStr) -> SecretStr:
+        raw = value.get_secret_value().strip().rstrip("/")
+        if raw:
+            parsed = urlsplit(raw)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                raise ValueError("BX24_WEBHOOK должен быть корректным HTTP(S) URL")
+        return SecretStr(raw)
+
+    @field_validator("bx24_payment_products")
+    @classmethod
+    def validate_payment_products(cls, value: dict[str, int]) -> dict[str, int]:
+        normalized: dict[str, int] = {}
+        for title, product_id in value.items():
+            clean_title = title.strip()
+            if not clean_title or isinstance(product_id, bool) or product_id <= 0:
+                raise ValueError("BX24_PAYMENT_PRODUCTS должен содержать названия и положительные ID")
+            if clean_title in normalized:
+                raise ValueError("Названия товаров в BX24_PAYMENT_PRODUCTS не должны повторяться")
+            normalized[clean_title] = product_id
+        return normalized
+
+    @field_validator("bx24_new_lead_status_id", "bx24_payment_currency")
+    @classmethod
+    def strip_required_payment_value(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Значение настройки платежей не может быть пустым")
+        return value
+
+    @model_validator(mode="after")
+    def validate_payment_amount_range(self) -> "Settings":
+        if self.bx24_payment_min_amount > self.bx24_payment_max_amount:
+            raise ValueError("BX24_PAYMENT_MIN_AMOUNT не может быть больше максимальной суммы")
+        return self
+
+    @property
+    def bx24_webhook_url(self) -> str:
+        return self.bx24_webhook.get_secret_value()
 
     @property
     def session_redis_url(self) -> str:

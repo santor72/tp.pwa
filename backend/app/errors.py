@@ -121,3 +121,28 @@ class MessengerLinkError(ApiError):
 class MessengerLinkTokenError(MessengerLinkError):
     def __init__(self) -> None:
         super().__init__("MESSENGER_LINK_TOKEN_INVALID", "Ссылка для привязки недействительна или истекла", status.HTTP_400_BAD_REQUEST)
+
+
+class PaymentsNotConfiguredError(ApiError):
+    def __init__(self) -> None:
+        super().__init__(status.HTTP_503_SERVICE_UNAVAILABLE, "PAYMENTS_NOT_CONFIGURED", "Платёжный терминал не настроен")
+
+
+class Bitrix24Error(ApiError):
+    def __init__(self, code: str = "BX24_UNAVAILABLE", message: str = "Битрикс24 временно недоступен", status_code: int = status.HTTP_502_BAD_GATEWAY) -> None:
+        super().__init__(status_code, code, message)
+
+
+class PaymentNotFoundError(ApiError):
+    def __init__(self) -> None:
+        super().__init__(status.HTTP_404_NOT_FOUND, "PAYMENT_NOT_FOUND", "Платёжная операция не найдена")
+
+
+class PaymentClientAmbiguousError(ApiError):
+    def __init__(self) -> None:
+        super().__init__(status.HTTP_409_CONFLICT, "BX24_CLIENT_AMBIGUOUS", "Найдено несколько подходящих клиентов")
+
+
+class PaymentStateError(ApiError):
+    def __init__(self, message: str = "Операция находится в неподходящем состоянии") -> None:
+        super().__init__(status.HTTP_409_CONFLICT, "PAYMENT_STATE_INVALID", message)

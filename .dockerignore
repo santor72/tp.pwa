@@ -3,6 +3,7 @@
 .env.*
 !.env.example
 node_modules
+.venv
 dist
 tmp
 __pycache__

@@ -16,7 +16,7 @@ const session = {
     },
   },
   csrf_token: 'csrf-test',
-  capabilities: { domofon: true, messenger_settings: true, all_tickets: false },
+  capabilities: { payments: true, messenger_settings: true, all_tickets: false },
 }
 
 const ticket = {
@@ -44,20 +44,21 @@ function json(body: unknown, status = 200): Response {
   })
 }
 
-async function openDomofon() {
+async function openPayments() {
   await screen.findByRole('heading', { name: 'Заявки сегодня' })
-  fireEvent.click(screen.getByRole('button', { name: /Домофон/ }))
-  await screen.findByRole('heading', { name: 'Домофоны' })
+  fireEvent.click(screen.getByRole('button', { name: /Оплата/ }))
+  await screen.findByRole('heading', { name: 'Оплата' })
 }
 
 afterEach(() => {
   cleanup()
   localStorage.clear()
+  sessionStorage.clear()
   vi.useRealTimers()
   vi.unstubAllGlobals()
 })
 
-describe('Домофоны', () => {
+describe('Платёжный терминал', () => {
   it('скрывает раздел без разрешения client.create', async () => {
     const restrictedSession = {
       ...session,
@@ -65,7 +66,7 @@ describe('Домофоны', () => {
         ...session.user,
         user_permissions: { client: { create: false } },
       },
-      capabilities: { ...session.capabilities, domofon: false },
+      capabilities: { ...session.capabilities, payments: false },
     }
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input)
@@ -77,100 +78,120 @@ describe('Домофоны', () => {
     render(<App />)
 
     await screen.findByRole('heading', { name: 'Заявки сегодня' })
-    expect(screen.queryByRole('button', { name: /Домофон/ })).toBeNull()
-    expect(screen.queryByRole('heading', { name: 'Домофоны' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Оплата/ })).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Оплата' })).toBeNull()
   })
 
-  it('проходит пошаговое создание пользователя и отправляет все поля', async () => {
+  it('проходит мастер с адресом и показывает ссылку при ошибке SMS', async () => {
     let createRequest: RequestInit | undefined
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input)
       if (path === '/api/auth/session') return json(session)
       if (path === '/api/tickets/today') return json([])
-      if (path === '/api/domofon/addresses') {
+      if (path === '/api/payments/addresses') {
         return json([{ locid: 4217, loctext: 'Земская улица, 5' }])
       }
-      if (path === '/api/domofon/create') {
+      if (path === '/api/payments/products') return json([{ product_id: 123, title: 'Подключение', default_amount: '1500.00', currency: 'RUB', price_override_allowed: true }])
+      if (path === '/api/payments') {
         createRequest = init
-        return json({ ok: true, reason: 'Создан пользователь 15600453' })
+        return json({ id: '3a2cf25b-8daa-4c91-9e86-c0aa3722a68c', status: 'draft' }, 202)
       }
+      if (path === '/api/payments/3a2cf25b-8daa-4c91-9e86-c0aa3722a68c') return json({
+        id: '3a2cf25b-8daa-4c91-9e86-c0aa3722a68c', status: 'send_failed', current_step: 'send', send_status: 'send_failed',
+        product_title: 'Подключение', catalog_amount: '1500.00', actual_amount: '1700.00', currency: 'RUB',
+        payment_url: 'https://pay.example/full', payment_short_url: 'https://pay.example/s', payment_qr: null,
+        candidates: [], error_code: null, error_message: null, created_at: '2026-09-01T10:00:00Z', updated_at: '2026-09-01T10:00:01Z',
+      })
       throw new Error(`Неожиданный запрос: ${path}`)
     })
     vi.stubGlobal('fetch', fetchMock)
 
     render(<App />)
 
-    await openDomofon()
-    expect(screen.queryByLabelText(/^Квартира/)).toBeNull()
-
-    fireEvent.click(screen.getByRole('button', { name: /Создать нового пользователя/ }))
-    expect(await screen.findByRole('heading', { name: 'Выберите адрес' })).toBeTruthy()
-
+    await openPayments()
     fireEvent.click(screen.getByRole('button', { name: /Земская улица, 5/ }))
-    expect(await screen.findByRole('heading', { name: 'Новый пользователь' })).toBeTruthy()
+    fireEvent.click(await screen.findByRole('button', { name: /Подключение/ }))
+    fireEvent.change(screen.getByLabelText(/^Фамилия/), { target: { value: 'Иванов' } })
+    fireEvent.change(screen.getByLabelText(/^Имя/), { target: { value: 'Иван' } })
+    fireEvent.change(screen.getByLabelText(/^Телефон/), { target: { value: '+79990000000' } })
+    fireEvent.change(screen.getByLabelText(/^Квартира/), { target: { value: '12А' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Продолжить' }))
+    fireEvent.change(screen.getByLabelText(/^Сумма/), { target: { value: '1700.00' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Сформировать оплату' }))
 
-    fireEvent.change(screen.getByLabelText(/^Квартира/), { target: { value: '143' } })
-    fireEvent.change(screen.getByLabelText(/^Подъезд/), { target: { value: '2' } })
-    fireEvent.change(screen.getByLabelText(/^ФИО/), { target: { value: 'Иванов Иван' } })
-    fireEvent.change(screen.getByLabelText('Номер телефона'), { target: { value: '+79990000000' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Создать пользователя' }))
-
-    expect(await screen.findByRole('heading', { name: 'Пользователь создан' })).toBeTruthy()
-    expect(screen.getByText('Создан пользователь 15600453')).toBeTruthy()
-    expect(JSON.parse(String(createRequest?.body))).toEqual({
-      locid: 4217,
-      field_flat: 143,
-      field_podezd: 2,
-      client_name: 'Иванов Иван',
+    expect(await screen.findByRole('heading', { name: 'Ссылка сформирована' })).toBeTruthy()
+    expect(screen.getByText(/SMS не настроено/)).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Открыть ссылку на оплату' }).getAttribute('href')).toBe('https://pay.example/s')
+    expect(JSON.parse(String(createRequest?.body))).toMatchObject({
+      address: { locid: 4217, loctext: 'Земская улица, 5' }, apartment: '12А', product_id: 123,
+      first_name: 'Иван', last_name: 'Иванов', amount: '1700.00',
       phone: '+79990000000',
     })
+    expect(JSON.parse(String(createRequest?.body)).idempotency_key).toMatch(/^[0-9a-f-]{36}$/)
     expect(new Headers(createRequest?.headers).get('X-CSRF-Token')).toBe('csrf-test')
   })
 
-  it('подключает услугу существующему пользователю', async () => {
-    let connectRequest: RequestInit | undefined
+  it('пропускает адрес и не показывает квартиру', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input)
       if (path === '/api/auth/session') return json(session)
       if (path === '/api/tickets/today') return json([])
-      if (path === '/api/domofon/connect') {
-        connectRequest = init
-        return json({ ok: true, reason: 'Услуга домофона подключена' })
-      }
+      if (path === '/api/payments/addresses') return json([])
+      if (path === '/api/payments/products') return json([{ product_id: 123, title: 'Услуга', default_amount: '10.00', currency: 'RUB', price_override_allowed: false }])
       throw new Error(`Неожиданный запрос: ${path}`)
     }))
 
     render(<App />)
-    await openDomofon()
-
-    fireEvent.change(screen.getByLabelText('Логин клиента'), { target: { value: 'client-10' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Подключить услугу' }))
-
-    expect(await screen.findByRole('heading', { name: 'Услуга подключена' })).toBeTruthy()
-    expect(screen.getByText('Услуга домофона подключена')).toBeTruthy()
-    expect(JSON.parse(String(connectRequest?.body))).toEqual({ service_login: 'client-10' })
+    await openPayments()
+    fireEvent.click(screen.getByRole('button', { name: 'Пропустить адрес' }))
+    fireEvent.click(await screen.findByRole('button', { name: /Услуга/ }))
+    expect(screen.queryByLabelText(/^Квартира/)).toBeNull()
   })
 
-  it('не показывает успех при ошибке ESB', async () => {
+  it('фильтрует адреса без учёта регистра', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input)
       if (path === '/api/auth/session') return json(session)
       if (path === '/api/tickets/today') return json([])
-      if (path === '/api/domofon/connect') {
-        return json({ code: 'ESB_CALL_FAILED', message: 'Пользователь не найден' }, 502)
-      }
+      if (path === '/api/payments/addresses') return json([{ locid: 1, loctext: 'Земская улица' }, { locid: 2, loctext: 'Лесная улица' }])
       throw new Error(`Неожиданный запрос: ${path}`)
     }))
 
     render(<App />)
-    await openDomofon()
+    await openPayments()
+    await screen.findByRole('button', { name: /Земская/ })
+    fireEvent.change(screen.getByPlaceholderText('Поиск по адресу'), { target: { value: 'ЛЕСНАЯ' } })
+    expect(screen.queryByRole('button', { name: /Земская/ })).toBeNull()
+    expect(screen.getByRole('button', { name: /Лесная/ })).toBeTruthy()
+  })
 
-    fireEvent.change(screen.getByLabelText('Логин клиента'), { target: { value: 'unknown' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Подключить услугу' }))
+  it('останавливает polling и показывает ID окончательно неуспешной операции', async () => {
+    const id = '3a2cf25b-8daa-4c91-9e86-c0aa3722a68c'
+    sessionStorage.setItem('tp-pwa:active-payment', id)
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input)
+      if (path === '/api/auth/session') return json(session)
+      if (path === '/api/tickets/today') return json([])
+      if (path === '/api/payments/addresses') return json([])
+      if (path === `/api/payments/${id}`) return json({
+        id, status: 'failed', current_step: 'payment_created', send_status: null,
+        product_title: 'Услуга', catalog_amount: '10.00', actual_amount: '10.00', currency: 'RUB',
+        payment_url: null, payment_short_url: null, payment_qr: null, candidates: [],
+        error_code: 'PAYMENT_PROCESSING_FAILED', error_message: 'Внешняя операция временно не выполнена',
+        created_at: '2026-09-01T10:00:00Z', updated_at: '2026-09-01T10:00:01Z',
+      })
+      throw new Error(`Неожиданный запрос: ${path}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
 
-    expect((await screen.findByRole('alert')).textContent).toContain('Пользователь не найден')
-    await waitFor(() => expect(screen.queryByText('Операция выполнена')).toBeNull())
-    expect(screen.getByRole('heading', { name: 'Домофоны' })).toBeTruthy()
+    render(<App />)
+    await openPayments()
+
+    expect(await screen.findByRole('heading', { name: 'Оплата не сформирована' })).toBeTruthy()
+    expect(screen.getByText(`ID операции: ${id}`)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Отправить повторно' })).toBeNull()
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(fetchMock.mock.calls.filter(call => String(call[0]) === `/api/payments/${id}`)).toHaveLength(1)
   })
 })
 
