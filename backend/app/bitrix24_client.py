@@ -8,7 +8,7 @@ from app.errors import Bitrix24Error, PaymentsNotConfiguredError
 
 
 READ_METHOD_PREFIXES = (
-    "crm.duplicate.", "crm.lead.get", "crm.lead.list", "crm.contact.list",
+    "crm.duplicate.", "crm.lead.get", "crm.lead.list", "crm.contact.get", "crm.contact.list",
     "crm.lead.contact.items.get", "crm.item.get", "crm.item.list",
     "crm.item.productrow.list", "crm.item.payment.get", "crm.item.payment.list",
     "crm.item.payment.product.list", "catalog.product.get", "catalog.price.list",
@@ -95,6 +95,20 @@ class Bitrix24Client:
 
     async def create_lead(self, fields: dict[str, Any]) -> int:
         return int(await self.call("crm.lead.add", {"fields": fields}, read=False))
+
+    async def get_contact(self, contact_id: int) -> dict[str, Any]:
+        result = await self.call("crm.contact.get", {"id": contact_id})
+        return result if isinstance(result, dict) else {}
+
+    async def get_lead(self, lead_id: int) -> dict[str, Any]:
+        result = await self.call("crm.lead.get", {"id": lead_id})
+        return result if isinstance(result, dict) else {}
+
+    async def update_contact(self, contact_id: int, fields: dict[str, Any]) -> None:
+        await self.call("crm.contact.update", {"id": contact_id, "fields": fields}, read=False)
+
+    async def update_lead(self, lead_id: int, fields: dict[str, Any]) -> None:
+        await self.call("crm.lead.update", {"id": lead_id, "fields": fields}, read=False)
 
     async def add_contact_to_lead(self, lead_id: int, contact_id: int) -> None:
         await self.call("crm.lead.contact.add", {"id": lead_id, "fields": {"CONTACT_ID": contact_id, "IS_PRIMARY": "Y"}}, read=False)

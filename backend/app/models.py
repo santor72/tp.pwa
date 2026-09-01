@@ -77,6 +77,7 @@ class PaymentTransaction(Base):
     second_name: Mapped[str | None] = mapped_column(String(255))
     last_name: Mapped[str] = mapped_column(String(255), nullable=False)
     phone_normalized: Mapped[str] = mapped_column(String(32), nullable=False)
+    email: Mapped[str | None] = mapped_column(String(320))
     bitrix_lead_id: Mapped[int | None] = mapped_column(Integer)
     bitrix_contact_id: Mapped[int | None] = mapped_column(Integer)
     bitrix_invoice_id: Mapped[int | None] = mapped_column(Integer, unique=True)

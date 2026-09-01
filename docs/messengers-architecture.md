@@ -97,7 +97,7 @@ cookie, CSRF или токены ТехПортала.
 
 | Capability | Правило |
 |---|---|
-| `domofon` | `permissions.client.create === true` |
+| `domofon` | `permissions.tickets.execution === true` |
 | `messenger_settings` | роль `admin` или `MESSENGER_SHOW=true` |
 | `all_tickets` | роль `admin` или `manager` |
 

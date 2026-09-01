@@ -4,7 +4,7 @@ from app.roles import UserRole
 
 
 def test_capabilities_combine_role_configuration_and_techportal_permission() -> None:
-    admin = capabilities_for(UserRole.ADMIN, {"client": {"create": True}}, False)
+    admin = capabilities_for(UserRole.ADMIN, {"tickets": {"execution": True}}, False)
     manager = capabilities_for(UserRole.MANAGER, {}, False)
     user = capabilities_for(UserRole.USER, {}, False)
     visible_for_all = capabilities_for(UserRole.USER, {}, True)

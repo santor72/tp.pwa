@@ -29,7 +29,7 @@ class FakePaymentStatus:
 def session(permission: bool = True) -> SessionData:
     now = datetime.now(UTC)
     return SessionData(
-        user=UserProfile(id=7, email="employee@example.test", first_name="Иван", status="active", user_permissions={"client": {"create": permission}}),
+        user=UserProfile(id=7, email="employee@example.test", first_name="Иван", status="active", user_permissions={"tickets": {"execution": permission}}),
         internal_user_id=uuid4(), csrf_token="csrf-test", created_at=now, absolute_expires_at=now + timedelta(hours=1),
     )
 

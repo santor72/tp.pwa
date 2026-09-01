@@ -59,7 +59,7 @@ afterEach(() => {
 })
 
 describe('Платёжный терминал', () => {
-  it('скрывает раздел без разрешения client.create', async () => {
+  it('скрывает раздел без разрешения tickets.execution', async () => {
     const restrictedSession = {
       ...session,
       user: {
@@ -114,6 +114,7 @@ describe('Платёжный терминал', () => {
     fireEvent.change(screen.getByLabelText(/^Фамилия/), { target: { value: 'Иванов' } })
     fireEvent.change(screen.getByLabelText(/^Имя/), { target: { value: 'Иван' } })
     fireEvent.change(screen.getByLabelText(/^Телефон/), { target: { value: '+79990000000' } })
+    fireEvent.change(screen.getByLabelText(/^E-mail/), { target: { value: 'ivan@example.com' } })
     fireEvent.change(screen.getByLabelText(/^Квартира/), { target: { value: '12А' } })
     fireEvent.click(screen.getByRole('button', { name: 'Продолжить' }))
     fireEvent.change(screen.getByLabelText(/^Сумма/), { target: { value: '1700.00' } })
@@ -126,6 +127,7 @@ describe('Платёжный терминал', () => {
       address: { locid: 4217, loctext: 'Земская улица, 5' }, apartment: '12А', product_id: 123,
       first_name: 'Иван', last_name: 'Иванов', amount: '1700.00',
       phone: '+79990000000',
+      email: 'ivan@example.com',
     })
     expect(JSON.parse(String(createRequest?.body)).idempotency_key).toMatch(/^[0-9a-f-]{36}$/)
     expect(new Headers(createRequest?.headers).get('X-CSRF-Token')).toBe('csrf-test')

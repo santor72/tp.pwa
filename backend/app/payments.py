@@ -62,6 +62,7 @@ class PaymentService:
                 "second_name": payload.second_name,
                 "last_name": payload.last_name,
                 "phone_normalized": payload.phone,
+                "email": payload.email,
                 "status": "draft",
                 "current_step": "draft",
                 "next_attempt_at": now,

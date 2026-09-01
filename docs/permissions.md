@@ -49,7 +49,7 @@ Frontend получает готовый набор `capabilities` и испол
 
 | Capability | Кто получает | Использование |
 |---|---|---|
-| `payments` | Пользователь с `permissions.client.create === true` | Показ и доступ к разделу «Оплата» |
+| `payments` | Пользователь с `permissions.tickets.execution === true` | Показ и доступ к разделу «Оплата» |
 | `messenger_settings` | `admin`, либо любой пользователь при `MESSENGER_SHOW=true` | Показ «Настроек» и управление привязкой Telegram |
 | `all_tickets` | `admin`, `manager` | Показ переключателя «Все заявки» |
 

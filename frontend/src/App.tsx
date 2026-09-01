@@ -172,6 +172,7 @@ function Payments({ session }: { session: Session }) {
   const [secondName, setSecondName] = useState('')
   const [lastName, setLastName] = useState('')
   const [phone, setPhone] = useState('')
+  const [email, setEmail] = useState('')
   const [amount, setAmount] = useState('')
   const [transactionId, setTransactionId] = useState<string | null>(() => sessionStorage.getItem(ACTIVE_PAYMENT_KEY))
   const [transaction, setTransaction] = useState<PaymentTransaction | null>(null)
@@ -223,6 +224,7 @@ function Payments({ session }: { session: Session }) {
     setSecondName('')
     setLastName('')
     setPhone('')
+    setEmail('')
     setAmount('')
     setTransaction(null)
     setTransactionId(null)
@@ -263,7 +265,7 @@ function Payments({ session }: { session: Session }) {
         ...(selectedLocation ? { address: selectedLocation, apartment: apartment.trim() } : {}),
         product_id: selectedProduct.product_id,
         first_name: firstName.trim(), second_name: secondName.trim() || undefined,
-        last_name: lastName.trim(), phone: paymentPhoneE164(phone), amount: amount.replace(',', '.'),
+        last_name: lastName.trim(), phone: paymentPhoneE164(phone), email: email.trim() || undefined, amount: amount.replace(',', '.'),
       }, session.csrf_token)
       setTransactionId(response.id)
       setScreen('progress')
@@ -337,6 +339,7 @@ function Payments({ session }: { session: Session }) {
           <div className="field-row"><Field label="Фамилия" required><input value={lastName} onChange={event => setLastName(event.target.value)} autoComplete="family-name" required /></Field><Field label="Имя" required><input value={firstName} onChange={event => setFirstName(event.target.value)} autoComplete="given-name" required /></Field></div>
           <Field label="Отчество"><input value={secondName} onChange={event => setSecondName(event.target.value)} autoComplete="additional-name" /></Field>
           <Field label="Телефон" required><input type="tel" value={phone} onChange={event => setPhone(formatPaymentPhone(event.target.value))} autoComplete="tel" inputMode="tel" pattern={String.raw`\+7 \(\d{3}\) \d{3}-\d{2}-\d{2}`} title="Введите номер в формате +7 (999) 123-45-67" placeholder="+7 (999) 123-45-67" maxLength={18} required /></Field>
+          <Field label="E-mail"><input type="email" value={email} onChange={event => setEmail(event.target.value)} autoComplete="email" placeholder="client@example.com" /></Field>
           {selectedLocation && <Field label="Квартира / офис" required><input value={apartment} onChange={event => setApartment(event.target.value)} placeholder="42, 12А или офис 3" required /></Field>}
           <button className="primary-button">Продолжить</button>
         </form>
@@ -348,7 +351,7 @@ function Payments({ session }: { session: Session }) {
       <section className="step-content">
         <div className="step-heading with-back"><button className="icon-button" aria-label="Назад" onClick={() => setScreen('client')}><BackIcon /></button><div><h1>Сумма и подтверждение</h1><p>Шаг 4 из 4</p></div></div>
         <form className="panel create-form" onSubmit={submit}>
-          <div className="payment-summary"><strong>{selectedProduct.title}</strong><span>{lastName} {firstName} {secondName}</span><span>{phone}</span><span>{selectedLocation ? `${selectedLocation.loctext}, ${apartment}` : 'Без адреса'}</span></div>
+          <div className="payment-summary"><strong>{selectedProduct.title}</strong><span>{lastName} {firstName} {secondName}</span><span>{phone}</span>{email && <span>{email}</span>}<span>{selectedLocation ? `${selectedLocation.loctext}, ${apartment}` : 'Без адреса'}</span></div>
           <Field label={`Сумма, ${selectedProduct.currency}`} required><input inputMode="decimal" value={amount} onChange={event => setAmount(event.target.value)} readOnly={!selectedProduct.price_override_allowed} required /></Field>
           {error && <ErrorBox text={error} />}
           <button className="primary-button" disabled={loading}>{loading ? 'Формирование…' : 'Сформировать оплату'}</button>

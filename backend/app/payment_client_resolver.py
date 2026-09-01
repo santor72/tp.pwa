@@ -31,7 +31,9 @@ class PaymentClientResolver:
         if len(contact_ids) > 1:
             raise AmbiguousClient([self._candidate("contact", item) for item in contact_ids])
         if contact_ids:
-            return ResolvedClient(contact_id=contact_ids[0])
+            contact_id = contact_ids[0]
+            await self._ensure_email("contact", contact_id, transaction.email)
+            return ResolvedClient(contact_id=contact_id)
 
         lead_ids = await self._bitrix.duplicate_ids("LEAD", phone_variants)
         if len(lead_ids) > 1:
@@ -56,15 +58,18 @@ class PaymentClientResolver:
         if (entity_type, entity_id) not in allowed:
             raise ValueError("candidate is not in snapshot")
         if entity_type == "contact":
+            await self._ensure_email("contact", entity_id, transaction.email)
             return ResolvedClient(contact_id=entity_id)
         return await self.resolve_lead(transaction, entity_id)
 
     async def resolve_lead(self, transaction: PaymentTransaction, lead_id: int) -> ResolvedClient:
+        await self._ensure_email("lead", lead_id, transaction.email)
         contacts = await self._bitrix.lead_contacts(lead_id)
         if contacts:
             primary = [item for item in contacts if item.get("IS_PRIMARY") in {True, "Y", 1, "1"}]
             chosen = min(primary or contacts, key=lambda item: int(item.get("SORT", 2_147_483_647)))
             contact_id = int(chosen.get("CONTACT_ID", chosen.get("ID")))
+            await self._ensure_email("contact", contact_id, transaction.email)
             return ResolvedClient(contact_id=contact_id, lead_id=lead_id)
         contact_id = await self._find_or_create_contact(transaction, f"{transaction.id}:lead:{lead_id}")
         await self._bitrix.ensure_contact_on_lead(lead_id, contact_id)
@@ -75,6 +80,7 @@ class PaymentClientResolver:
         existing = await self._bitrix.find_by_origin("lead", origin_id)
         if existing:
             lead_id = int(existing[0]["ID"])
+            await self._ensure_email("lead", lead_id, transaction.email)
         else:
             fields: dict[str, Any] = {
                 "TITLE": f"Оплата: {transaction.product_title}",
@@ -86,6 +92,8 @@ class PaymentClientResolver:
                 "ORIGINATOR_ID": "TECHPORTAL_PWA",
                 "ORIGIN_ID": origin_id,
             }
+            if transaction.email:
+                fields["EMAIL"] = [self._email_value(transaction.email)]
             if transaction.address_id is not None:
                 fields.update({
                     "PARENT_ID_1032": transaction.address_id,
@@ -100,15 +108,39 @@ class PaymentClientResolver:
     async def _find_or_create_contact(self, transaction: PaymentTransaction, origin_id: str) -> int:
         existing = await self._bitrix.find_by_origin("contact", origin_id)
         if existing:
-            return int(existing[0]["ID"])
-        return await self._bitrix.create_contact({
+            contact_id = int(existing[0]["ID"])
+            await self._ensure_email("contact", contact_id, transaction.email)
+            return contact_id
+        fields: dict[str, Any] = {
             "NAME": transaction.first_name,
             "SECOND_NAME": transaction.second_name or "",
             "LAST_NAME": transaction.last_name,
             "PHONE": [{"VALUE": transaction.phone_normalized, "VALUE_TYPE": "WORK"}],
             "ORIGINATOR_ID": "TECHPORTAL_PWA",
             "ORIGIN_ID": origin_id,
-        })
+        }
+        if transaction.email:
+            fields["EMAIL"] = [self._email_value(transaction.email)]
+        return await self._bitrix.create_contact(fields)
+
+    async def _ensure_email(self, entity_type: str, entity_id: int, email: str | None) -> None:
+        """Append a submitted e-mail to the CRM multi-field without replacing values."""
+        if not email:
+            return
+        entity = await (self._bitrix.get_contact(entity_id) if entity_type == "contact" else self._bitrix.get_lead(entity_id))
+        current = entity.get("EMAIL", [])
+        emails = [dict(item) for item in current if isinstance(item, dict)] if isinstance(current, list) else []
+        if any(str(item.get("VALUE", "")).strip().casefold() == email.casefold() for item in emails):
+            return
+        emails.append(self._email_value(email))
+        if entity_type == "contact":
+            await self._bitrix.update_contact(entity_id, {"EMAIL": emails})
+        else:
+            await self._bitrix.update_lead(entity_id, {"EMAIL": emails})
+
+    @staticmethod
+    def _email_value(email: str) -> dict[str, str]:
+        return {"VALUE": email, "VALUE_TYPE": "WORK"}
 
     @staticmethod
     def _candidate(entity_type: str, entity_id: int) -> PaymentCandidate:

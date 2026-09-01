@@ -12,7 +12,7 @@ def transaction(**values):
     defaults = {
         "id": uuid4(), "phone_normalized": "+79991234567", "address_id": None,
         "address_text": None, "apartment": None, "first_name": "Иван", "second_name": None,
-        "last_name": "Иванов", "product_title": "Услуга", "candidate_snapshot": [],
+        "last_name": "Иванов", "product_title": "Услуга", "candidate_snapshot": [], "email": None,
     }
     return SimpleNamespace(**(defaults | values))
 
@@ -24,6 +24,8 @@ class FakeBitrix:
         self.address_leads: list[dict] = []
         self.relations: list[dict] = []
         self.origins: dict[str, list[dict]] = {}
+        self.contact_records: dict[int, dict] = {}
+        self.lead_records: dict[int, dict] = {}
         self.calls: list[tuple] = []
         self.duplicate_calls: list[tuple] = []
 
@@ -35,6 +37,10 @@ class FakeBitrix:
     async def find_by_origin(self, entity_type, origin_id): return self.origins.get(f"{entity_type}:{origin_id}", [])
     async def create_lead(self, fields): self.calls.append(("create_lead", fields)); return 20
     async def create_contact(self, fields): self.calls.append(("create_contact", fields)); return 30
+    async def get_contact(self, contact_id): return self.contact_records.get(contact_id, {})
+    async def get_lead(self, lead_id): return self.lead_records.get(lead_id, {})
+    async def update_contact(self, contact_id, fields): self.calls.append(("update_contact", contact_id, fields))
+    async def update_lead(self, lead_id, fields): self.calls.append(("update_lead", lead_id, fields))
     async def add_contact_to_lead(self, lead_id, contact_id): self.calls.append(("link", lead_id, contact_id))
     async def ensure_contact_on_lead(self, lead_id, contact_id):
         if contact_id not in {int(item.get("CONTACT_ID", item.get("ID", 0))) for item in self.relations}:
@@ -81,6 +87,26 @@ async def test_resolver_uses_primary_contact_of_existing_lead_without_changes() 
     result = await PaymentClientResolver(Settings(), bitrix).resolve(transaction())
     assert (result.contact_id, result.lead_id) == (3, 11)
     assert bitrix.calls == []
+
+
+@pytest.mark.asyncio
+async def test_resolver_appends_new_email_to_found_contact_without_replacing_existing() -> None:
+    bitrix = FakeBitrix(); bitrix.contacts = [7]
+    bitrix.contact_records[7] = {"EMAIL": [{"VALUE": "old@example.com", "VALUE_TYPE": "HOME"}]}
+    await PaymentClientResolver(Settings(), bitrix).resolve(transaction(email="new@example.com"))
+    assert bitrix.calls == [("update_contact", 7, {"EMAIL": [
+        {"VALUE": "old@example.com", "VALUE_TYPE": "HOME"},
+        {"VALUE": "new@example.com", "VALUE_TYPE": "WORK"},
+    ]})]
+
+
+@pytest.mark.asyncio
+async def test_resolver_does_not_duplicate_existing_email_and_updates_lead_and_contact() -> None:
+    bitrix = FakeBitrix(); bitrix.leads = [11]; bitrix.relations = [{"CONTACT_ID": 3, "IS_PRIMARY": "Y"}]
+    bitrix.lead_records[11] = {"EMAIL": []}
+    bitrix.contact_records[3] = {"EMAIL": [{"VALUE": "NEW@EXAMPLE.COM", "VALUE_TYPE": "WORK"}]}
+    await PaymentClientResolver(Settings(), bitrix).resolve(transaction(email="new@example.com"))
+    assert bitrix.calls == [("update_lead", 11, {"EMAIL": [{"VALUE": "new@example.com", "VALUE_TYPE": "WORK"}]})]
 
 
 @pytest.mark.asyncio

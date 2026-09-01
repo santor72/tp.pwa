@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 def _require_payments(actor) -> None:
-    if not has_permission(actor.permissions or {}, "client", "create"):
+    if not has_permission(actor.permissions or {}, "tickets", "execution"):
         raise PermissionDeniedError()
 
 

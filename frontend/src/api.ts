@@ -41,6 +41,7 @@ export type PaymentCreatePayload = {
   second_name?: string
   last_name: string
   phone: string
+  email?: string
   amount: string
 }
 export type TicketDay = 'today' | 'tomorrow'

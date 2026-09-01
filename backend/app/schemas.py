@@ -95,6 +95,7 @@ class PaymentCreateRequest(BaseModel):
     second_name: str | None = Field(default=None, max_length=255)
     last_name: str = Field(min_length=1, max_length=255)
     phone: str = Field(min_length=1, max_length=64)
+    email: str | None = Field(default=None, max_length=320)
     amount: Decimal
 
     @field_validator("first_name", "last_name")
@@ -110,6 +111,16 @@ class PaymentCreateRequest(BaseModel):
     def strip_optional(cls, value: str | None) -> str | None:
         value = value.strip() if value else None
         return value or None
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str | None) -> str | None:
+        value = value.strip().lower() if value else None
+        if not value:
+            return None
+        if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", value):
+            raise ValueError("Некорректный e-mail")
+        return value
 
     @field_validator("phone")
     @classmethod

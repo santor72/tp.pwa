@@ -6,7 +6,7 @@ from app.schemas import Capabilities
 
 def capabilities_for(role: UserRole, permissions: dict, messenger_show: bool) -> Capabilities:
     return Capabilities(
-        payments=has_permission(permissions, "client", "create"),
+        payments=has_permission(permissions, "tickets", "execution"),
         messenger_settings=messenger_show or role is UserRole.ADMIN,
         all_tickets=role in {UserRole.ADMIN, UserRole.MANAGER},
     )
