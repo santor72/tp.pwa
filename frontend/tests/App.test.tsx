@@ -59,6 +59,24 @@ afterEach(() => {
 })
 
 describe('Платёжный терминал', () => {
+  it('показывает инструкцию по оплате с первого шага', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/api/auth/session') return json(session)
+      if (String(input) === '/api/tickets/today') return json([])
+      if (String(input) === '/api/payments/addresses') return json([])
+      throw new Error(`Неожиданный запрос: ${input}`)
+    }))
+
+    render(<App />)
+    await openPayments()
+    fireEvent.click(screen.getByRole('button', { name: 'Как принять оплату' }))
+
+    expect(screen.getByRole('dialog', { name: 'Как принять оплату' })).toBeTruthy()
+    expect(screen.getByText(/Отправка СМС пока не работает/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Понятно' }))
+    expect(screen.queryByRole('dialog', { name: 'Как принять оплату' })).toBeNull()
+  })
+
   it('скрывает раздел без разрешения tickets.execution', async () => {
     const restrictedSession = {
       ...session,

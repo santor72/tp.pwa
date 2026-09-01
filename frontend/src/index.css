@@ -104,6 +104,13 @@ input:focus, textarea:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px #dbea
 .step-heading h1 { margin: 0; font-size: 1.45rem; line-height: 1.25; }
 .step-heading p { margin: .3rem 0 0; color: #64748b; font-size: .9rem; }
 .step-heading.with-back { display: flex; align-items: center; gap: .8rem; }
+.payment-instructions-button { margin-top: .25rem; padding: .15rem 0; border: 0; color: #2563eb; background: transparent; font-size: .82rem; font-weight: 800; text-decoration: underline; text-underline-offset: .15rem; }
+.payment-instructions-backdrop { position: fixed; z-index: 30; inset: 0; display: grid; align-items: end; padding: 1rem; background: #0f172a66; }
+.payment-instructions { width: min(100%, 42rem); max-height: min(85dvh, 44rem); margin: auto; overflow-y: auto; padding: 1.25rem; border-radius: 1.25rem; color: #172033; background: white; box-shadow: 0 20px 50px #0f172a66; }
+.payment-instructions-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.payment-instructions h2 { margin: 0; font-size: 1.2rem; }
+.payment-instructions ol { display: grid; gap: .75rem; margin: 1rem 0 1.25rem; padding-left: 1.4rem; color: #334155; line-height: 1.4; }
+.payment-instructions li { padding-left: .15rem; }
 .divider { display: flex; align-items: center; color: #94a3b8; font-size: .8rem; }
 .divider::before, .divider::after { content: ""; height: 1px; flex: 1; background: #dbe2ea; }
 .divider span { padding: 0 .8rem; }

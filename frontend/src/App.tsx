@@ -179,6 +179,7 @@ function Payments({ session }: { session: Session }) {
   const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [showInstructions, setShowInstructions] = useState(false)
 
   const visibleLocations = useMemo(() => {
     const query = locationSearch.trim().toLocaleLowerCase('ru')
@@ -303,7 +304,7 @@ function Payments({ session }: { session: Session }) {
   if (screen === 'address') {
     return (
       <section className="step-content">
-        <div className="step-heading"><h1>Оплата</h1><p>Шаг 1 из 4 · выберите адрес клиента</p></div>
+        <div className="step-heading"><h1>Оплата</h1><button className="payment-instructions-button" type="button" onClick={() => setShowInstructions(true)}>Как принять оплату</button><p>Шаг 1 из 4 · выберите адрес клиента</p></div>
         <input className="search-input" type="search" placeholder="Поиск по адресу" value={locationSearch} onChange={event => setLocationSearch(event.target.value)} />
         <button className="outline-button" disabled={loading} onClick={() => openProducts(null)}>{loading ? 'Загрузка…' : 'Пропустить адрес'}</button>
         {error && <ErrorBox text={error} />}
@@ -316,6 +317,21 @@ function Payments({ session }: { session: Session }) {
           ))}
         </div>
         {visibleLocations.length === 0 && <div className="panel empty-state">Адреса не найдены</div>}
+        {showInstructions && <div className="payment-instructions-backdrop" role="presentation" onClick={() => setShowInstructions(false)}>
+          <section className="payment-instructions" role="dialog" aria-modal="true" aria-labelledby="payment-instructions-title" onClick={event => event.stopPropagation()}>
+            <div className="payment-instructions-heading"><h2 id="payment-instructions-title">Как принять оплату</h2><button className="icon-button" type="button" aria-label="Закрыть инструкцию" onClick={() => setShowInstructions(false)}>×</button></div>
+            <ol>
+              <li>Выберите адрес клиента. Чтобы найти его быстрее, начните вводить адрес в строке поиска. Если адреса нет в списке или он не нужен, нажмите «Пропустить адрес».</li>
+              <li>Выберите услугу или товар.</li>
+              <li>Введите фамилию, имя и телефон клиента. Если выбрали адрес, укажите квартиру. E-mail указывать не обязательно.</li>
+              <li>Проверьте сумму. При необходимости измените её.</li>
+              <li>Нажмите «Сформировать оплату» и дождитесь результата.</li>
+              <li>Клиенту придёт сообщение на e-mail, если вы указали его. Отправка СМС пока не работает.</li>
+              <li>Предложите клиенту оплатить по ссылке из сообщения или отсканировать QR-код с экрана вашего телефона.</li>
+            </ol>
+            <button className="primary-button" type="button" onClick={() => setShowInstructions(false)}>Понятно</button>
+          </section>
+        </div>}
       </section>
     )
   }
