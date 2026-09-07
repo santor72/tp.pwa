@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from typing import Protocol
 from uuid import UUID
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -132,6 +132,27 @@ class PaymentRepository:
                 .limit(limit)
             )
             return list(result)
+
+    async def admin_list(self, *, date_from: datetime, date_to: datetime, phone: str | None, employee: str | None, page: int, page_size: int) -> tuple[list[PaymentTransaction], int]:
+        async with self._sessions() as session:
+            filters = [PaymentTransaction.status == "paid", PaymentTransaction.paid_at >= date_from, PaymentTransaction.paid_at < date_to]
+            phone_digits = ''.join(c for c in (phone or '') if c.isdigit())
+            if phone_digits:
+                filters.append(PaymentTransaction.phone_normalized.like(f"%{phone_digits}%"))
+            if employee:
+                pattern = f"%{employee.strip()}%"
+                filters.append(or_(PaymentTransaction.employee_display_name.ilike(pattern), PaymentTransaction.employee_external_id.ilike(pattern)))
+            total = int(await session.scalar(select(func.count()).select_from(PaymentTransaction).where(*filters)) or 0)
+            rows = await session.scalars(select(PaymentTransaction).where(*filters).order_by(PaymentTransaction.paid_at.desc(), PaymentTransaction.id.desc()).offset((page - 1) * page_size).limit(page_size))
+            return list(rows), total
+
+    async def admin_get(self, transaction_id: UUID) -> tuple[PaymentTransaction, list[PaymentTransactionEvent]] | None:
+        async with self._sessions() as session:
+            transaction = await session.scalar(select(PaymentTransaction).where(PaymentTransaction.id == transaction_id, PaymentTransaction.status == "paid"))
+            if transaction is None:
+                return None
+            events = list(await session.scalars(select(PaymentTransactionEvent).where(PaymentTransactionEvent.transaction_id == transaction_id).order_by(PaymentTransactionEvent.created_at.asc(), PaymentTransactionEvent.id.asc())))
+            return transaction, events
 
     async def update(self, transaction_id: UUID, **values) -> PaymentTransaction:
         async with self._sessions() as session:

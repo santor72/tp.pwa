@@ -3,13 +3,15 @@ import logging
 import secrets
 from urllib.parse import parse_qs
 from uuid import UUID
+from datetime import UTC, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Request, status
 
 from app.config import Settings, get_settings
-from app.dependencies import actor_from_session, require_csrf, require_session
+from app.dependencies import actor_from_session, require_csrf, require_session, require_admin
 from app.errors import PermissionDeniedError
-from app.logging import audit
+from app.logging import audit, redact
 from app.permissions import has_permission
 from app.schemas import (
     PaymentAcceptedResponse,
@@ -20,15 +22,59 @@ from app.schemas import (
     PaymentRecentResponse,
     PaymentTransactionResponse,
     SessionData,
+    AdminPaymentDetail, AdminPaymentEvent, AdminPaymentItem, AdminPaymentListResponse,
 )
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+MOSCOW = ZoneInfo("Europe/Moscow")
+
+
+def _admin_item(row) -> AdminPaymentItem:
+    return AdminPaymentItem(id=row.id, paid_at=row.paid_at, actual_amount=row.actual_amount, currency=row.currency, product_title=row.product_title, status="paid", phone=row.phone_normalized, email=row.email, employee_display_name=row.employee_display_name, employee_external_id=row.employee_external_id, bitrix_lead_id=row.bitrix_lead_id, bitrix_contact_id=row.bitrix_contact_id, bitrix_invoice_id=row.bitrix_invoice_id, bitrix_payment_id=row.bitrix_payment_id, bitrix_payment_account_number=row.bitrix_payment_account_number, bitrix_pay_system_name=row.bitrix_pay_system_name)
+
+
+def _date_bounds(date_from: str | None, date_to: str | None) -> tuple[datetime, datetime]:
+    today = datetime.now(MOSCOW).date()
+    start = datetime.strptime(date_from, "%Y-%m-%d").date() if date_from else today - timedelta(days=29)
+    end = datetime.strptime(date_to, "%Y-%m-%d").date() if date_to else today
+    if start > end:
+        raise ValueError("Начало периода не может быть позже конца")
+    return datetime.combine(start, time.min, MOSCOW).astimezone(UTC), datetime.combine(end + timedelta(days=1), time.min, MOSCOW).astimezone(UTC)
 
 
 def _require_payments(actor) -> None:
     if not has_permission(actor.permissions or {}, "tickets", "execution"):
         raise PermissionDeniedError()
+
+
+@router.get("/api/admin/payments", response_model=AdminPaymentListResponse)
+async def admin_payments(request: Request, date_from: str | None = None, date_to: str | None = None, phone: str | None = None, employee: str | None = None, page: int = 1, page_size: int = 50, admin=Depends(require_admin)) -> AdminPaymentListResponse:
+    if page < 1 or page_size < 1 or page_size > 100:
+        from app.errors import ApiError
+        raise ApiError(422, "VALIDATION_ERROR", "Некорректная пагинация")
+    try:
+        start, end = _date_bounds(date_from, date_to)
+    except ValueError as exc:
+        from app.errors import ApiError
+        raise ApiError(422, "VALIDATION_ERROR", str(exc)) from exc
+    _, _, actor = admin
+    rows, total = await request.app.state.payment_repository.admin_list(date_from=start, date_to=end, phone=phone, employee=employee, page=page, page_size=page_size)
+    audit(logger, "payment.admin.list.viewed", user_id=str(actor.user_id), date_from=date_from, date_to=date_to, page=page, page_size=page_size, count=total)
+    return AdminPaymentListResponse(items=[_admin_item(row) for row in rows], page=page, page_size=page_size, total=total)
+
+
+@router.get("/api/admin/payments/{transaction_id}", response_model=AdminPaymentDetail)
+async def admin_payment(transaction_id: UUID, request: Request, admin=Depends(require_admin)) -> AdminPaymentDetail:
+    _, _, actor = admin
+    result = await request.app.state.payment_repository.admin_get(transaction_id)
+    if result is None:
+        from app.errors import ApiError
+        raise ApiError(404, "PAYMENT_NOT_FOUND", "Оплаченная операция не найдена")
+    row, events = result
+    audit(logger, "payment.admin.detail.viewed", user_id=str(actor.user_id), transaction_id=str(transaction_id))
+    item = _admin_item(row)
+    return AdminPaymentDetail(**item.model_dump(), catalog_amount=row.catalog_amount, address_text=row.address_text, apartment=row.apartment, created_at=row.created_at, updated_at=row.updated_at, events=[AdminPaymentEvent(id=event.id, event_type=event.event_type, created_at=event.created_at, payload=redact(event.safe_payload)) for event in events])
 
 
 @router.get("/api/payments/addresses", response_model=list[PaymentAddress])

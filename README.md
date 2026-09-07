@@ -32,7 +32,8 @@ PWA для разъездных специалистов. Текущая вер�
    docker compose up --build
    ```
 
-3. Откройте `http://localhost:8081`.
+3. Откройте `http://localhost:8081`. Реестр оплат администратора доступен на
+   `http://localhost:8082/admin/`.
 
 Frontend и API работают на одном origin. В Docker Compose параметр `Secure`
 cookie отключён только для локального HTTP. В production он должен быть включён
@@ -70,6 +71,8 @@ curl http://127.0.0.1:8081/health/ready
 ## Сервисы
 
 - `frontend` — Nginx со статической PWA и reverse proxy `/api`;
+- `admin-frontend` — отдельная read-only админка реестра оплат; локально порт
+  `8082`, базовый путь задаётся `ADMIN_BASE_PATH`;
 - `api` — FastAPI;
 - `telegram-bot` — единственный aiogram long-polling процесс без публичного порта;
 - `payment-worker` — продолжение платёжных операций и резервная проверка статуса;
@@ -93,6 +96,8 @@ curl http://127.0.0.1:8081/health/ready
 - `POST /api/payments/{transaction_id}/client-selection`
 - `POST /api/payments/{transaction_id}/resend`
 - `GET /api/payments/recent`
+- `GET /api/admin/payments`
+- `GET /api/admin/payments/{transaction_id}`
 - `POST /api/webhooks/bitrix24/payments`
 - `GET /api/messenger-links`
 - `POST /api/messenger-links/telegram`

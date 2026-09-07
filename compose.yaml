@@ -172,6 +172,25 @@ services:
       api:
         condition: service_healthy
 
+  admin-frontend:
+    build:
+      context: .
+      dockerfile: admin-frontend/Dockerfile
+      args:
+        ADMIN_BASE_PATH: ${ADMIN_BASE_PATH:-/admin/}
+    ports:
+      - "127.0.0.1:8082:8080"
+    environment:
+      ADMIN_BASE_PATH: ${ADMIN_BASE_PATH:-/admin/}
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   vector:
     user: "0:0"
     image: timberio/vector:0.44.0-alpine

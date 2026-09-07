@@ -9,9 +9,9 @@ def test_capabilities_combine_role_configuration_and_techportal_permission() -> 
     user = capabilities_for(UserRole.USER, {}, False)
     visible_for_all = capabilities_for(UserRole.USER, {}, True)
 
-    assert admin.model_dump() == {"payments": True, "messenger_settings": True, "all_tickets": True}
-    assert manager.model_dump() == {"payments": False, "messenger_settings": False, "all_tickets": True}
-    assert user.model_dump() == {"payments": False, "messenger_settings": False, "all_tickets": False}
+    assert admin.model_dump() == {"payments": True, "messenger_settings": True, "all_tickets": True, "payment_admin": True}
+    assert manager.model_dump() == {"payments": False, "messenger_settings": False, "all_tickets": True, "payment_admin": False}
+    assert user.model_dump() == {"payments": False, "messenger_settings": False, "all_tickets": False, "payment_admin": False}
     assert visible_for_all.messenger_settings is True
 
 

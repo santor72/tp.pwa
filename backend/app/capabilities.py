@@ -9,6 +9,7 @@ def capabilities_for(role: UserRole, permissions: dict, messenger_show: bool) ->
         payments=has_permission(permissions, "tickets", "execution"),
         messenger_settings=messenger_show or role is UserRole.ADMIN,
         all_tickets=role in {UserRole.ADMIN, UserRole.MANAGER},
+        payment_admin=role is UserRole.ADMIN,
     )
 
 

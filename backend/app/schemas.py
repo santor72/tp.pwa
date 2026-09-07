@@ -40,6 +40,7 @@ class Capabilities(BaseModel):
     payments: bool = False
     messenger_settings: bool = False
     all_tickets: bool = False
+    payment_admin: bool = False
 
 
 class SessionResponse(BaseModel):
@@ -63,6 +64,57 @@ class SessionData(BaseModel):
     csrf_token: str
     created_at: datetime
     absolute_expires_at: datetime
+
+
+class AdminPaymentListQuery(BaseModel):
+    date_from: datetime | None = None
+    date_to: datetime | None = None
+    phone: str | None = Field(default=None, max_length=64)
+    employee: str | None = Field(default=None, max_length=255)
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=50, ge=1, le=100)
+
+
+class AdminPaymentEvent(BaseModel):
+    id: UUID
+    event_type: str
+    created_at: datetime
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class AdminPaymentItem(BaseModel):
+    id: UUID
+    paid_at: datetime
+    actual_amount: Decimal
+    currency: str
+    product_title: str
+    status: Literal["paid"]
+    phone: str
+    email: str | None = None
+    employee_display_name: str | None = None
+    employee_external_id: str | None = None
+    bitrix_lead_id: int | None = None
+    bitrix_contact_id: int | None = None
+    bitrix_invoice_id: int | None = None
+    bitrix_payment_id: int | None = None
+    bitrix_payment_account_number: str | None = None
+    bitrix_pay_system_name: str | None = None
+
+
+class AdminPaymentDetail(AdminPaymentItem):
+    catalog_amount: Decimal
+    address_text: str | None = None
+    apartment: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    events: list[AdminPaymentEvent] = Field(default_factory=list)
+
+
+class AdminPaymentListResponse(BaseModel):
+    items: list[AdminPaymentItem]
+    page: int
+    page_size: int
+    total: int
 
 
 class PaymentAddress(BaseModel):

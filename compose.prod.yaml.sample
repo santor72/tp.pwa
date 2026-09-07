@@ -1,4 +1,8 @@
 services:
+  admin-frontend:
+    restart: unless-stopped
+    environment:
+      ADMIN_BASE_PATH: ${ADMIN_BASE_PATH:-/admin/}
   frontend:
       restart: unless-stopped
   api:

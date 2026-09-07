@@ -5,7 +5,7 @@ from fastapi import Depends, Request
 
 from app.config import Settings, get_settings
 from app.actors import Actor
-from app.errors import CsrfError, OriginError, SessionExpiredError
+from app.errors import CsrfError, OriginError, SessionExpiredError, PermissionDeniedError
 from app.logging import audit, stable_hash
 
 logger = logging.getLogger(__name__)
@@ -60,3 +60,11 @@ async def actor_from_session(request: Request, session: SessionData) -> Actor:
         from app.errors import ApiError
         raise ApiError(503, "USER_STORAGE_UNAVAILABLE", "Не удалось найти пользователя")
     return Actor(user_id=user_id, techportal_user_id=str(session.user.id), channel="pwa", permissions=session.user.user_permissions, role=session.user.role)
+
+
+async def require_admin(request: Request, session_pair: tuple[str, SessionData] = Depends(require_session)) -> tuple[str, SessionData, Actor]:
+    _, session = session_pair
+    actor = await actor_from_session(request, session)
+    if actor.role.value != "admin":
+        raise PermissionDeniedError()
+    return session_pair[0], session, actor
