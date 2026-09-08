@@ -45,6 +45,7 @@ async def lifespan(app: FastAPI):
     app.state.auth_provider = app.state.services.auth_provider
     app.state.payment_addresses = app.state.services.payment_addresses
     app.state.payment_catalog = app.state.services.payment_catalog
+    app.state.payment_repository = app.state.services.payment_repository
     app.state.payment_service = app.state.services.payment_service
     app.state.payment_status = app.state.services.payment_status
     app.state.ticket_service = app.state.services.ticket_service
