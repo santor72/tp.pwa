@@ -175,14 +175,10 @@ docker run --rm techportal-frontend-test pnpm test
   webhook с секретом `BX24_PAYMENT_WEBHOOK_TOKEN`.
 - Если SMS не настроено, операция остаётся в `send_failed`, а короткая ссылка и
   QR доступны сотруднику; успешная отправка не симулируется.
-- Для события `OnPaymentEntitySaved` используйте endpoint
-  `/api/webhooks/bitrix24/payments`. Значение Bitrix24
-  `auth[application_token]` должно совпадать с `BX24_PAYMENT_WEBHOOK_TOKEN`;
-  секрет должен отличаться от REST webhook и храниться только на сервере.
-- `event.bind` регистрируется из OAuth-контекста Bitrix24, а не входящим REST
-  webhook. При deployment укажите публичный HTTPS URL
-  `https://<домен>/api/webhooks/bitrix24/payments`; polling остаётся резервным
-  способом подтверждения оплаты.
+- Для события `OnPaymentEntitySaved` зарегистрируйте исходящий WEBHOOK в Bitrix24 
+  endpoint  - <адрес приложения>`/api/webhooks/bitrix24/payments`.
+  полученный токен авторизации нужно записать в `BX24_PAYMENT_WEBHOOK_TOKEN` ;
+  polling остаётся резервным  способом подтверждения оплаты.
 - После отправки SMS робот должен перевести счёт со стадии
   `BX24_PAYMENT_SEND_TRIGGER` на следующую стадию. Иначе «Отправить повторно»
   может не вызвать робота повторно.
