@@ -45,11 +45,11 @@ class PaymentClientResolver:
             leads = await self._bitrix.leads_by_address(transaction.address_id, transaction.apartment)
             if len(leads) > 1:
                 raise AmbiguousClient([
-                    PaymentCandidate(entity_type="lead", entity_id=int(item["ID"]), display_name=str(item.get("TITLE") or f"Лид #{item['ID']}"))
+                    PaymentCandidate(entity_type="lead", entity_id=int(item["ID"]), display_name=str(item.get("TITLE") or f"Лид #{item['ID']}"), matched_by="address")
                     for item in leads
                 ])
             if leads:
-                return await self.resolve_lead(transaction, int(leads[0]["ID"]))
+                return await self.resolve_lead(transaction, int(leads[0]["ID"]), add_phone=True)
 
         return await self._create_client(transaction)
 
@@ -60,9 +60,10 @@ class PaymentClientResolver:
         if entity_type == "contact":
             await self._ensure_email("contact", entity_id, transaction.email)
             return ResolvedClient(contact_id=entity_id)
-        return await self.resolve_lead(transaction, entity_id)
+        add_phone = any(item.get("entity_type") == "lead" and int(item.get("entity_id", 0)) == entity_id and item.get("matched_by") == "address" for item in transaction.candidate_snapshot)
+        return await self.resolve_lead(transaction, entity_id, add_phone=add_phone)
 
-    async def resolve_lead(self, transaction: PaymentTransaction, lead_id: int) -> ResolvedClient:
+    async def resolve_lead(self, transaction: PaymentTransaction, lead_id: int, *, add_phone: bool = False) -> ResolvedClient:
         await self._ensure_email("lead", lead_id, transaction.email)
         contacts = await self._bitrix.lead_contacts(lead_id)
         if contacts:
@@ -70,9 +71,15 @@ class PaymentClientResolver:
             chosen = min(primary or contacts, key=lambda item: int(item.get("SORT", 2_147_483_647)))
             contact_id = int(chosen.get("CONTACT_ID", chosen.get("ID")))
             await self._ensure_email("contact", contact_id, transaction.email)
+            if add_phone:
+                await self._ensure_phone("contact", contact_id, transaction.phone_normalized)
+                await self._ensure_phone("lead", lead_id, transaction.phone_normalized)
             return ResolvedClient(contact_id=contact_id, lead_id=lead_id)
-        contact_id = await self._find_or_create_contact(transaction, f"{transaction.id}:lead:{lead_id}")
+        contact_id = await self._find_or_create_contact(transaction, f"{transaction.id}:lead:{lead_id}", lead_id=lead_id)
         await self._bitrix.ensure_contact_on_lead(lead_id, contact_id)
+        if add_phone:
+            await self._ensure_phone("contact", contact_id, transaction.phone_normalized)
+            await self._ensure_phone("lead", lead_id, transaction.phone_normalized)
         return ResolvedClient(contact_id=contact_id, lead_id=lead_id)
 
     async def _create_client(self, transaction: PaymentTransaction) -> ResolvedClient:
@@ -105,7 +112,7 @@ class PaymentClientResolver:
         await self._bitrix.ensure_contact_on_lead(lead_id, contact_id)
         return ResolvedClient(contact_id=contact_id, lead_id=lead_id)
 
-    async def _find_or_create_contact(self, transaction: PaymentTransaction, origin_id: str) -> int:
+    async def _find_or_create_contact(self, transaction: PaymentTransaction, origin_id: str, *, lead_id: int | None = None) -> int:
         existing = await self._bitrix.find_by_origin("contact", origin_id)
         if existing:
             contact_id = int(existing[0]["ID"])
@@ -121,6 +128,11 @@ class PaymentClientResolver:
         }
         if transaction.email:
             fields["EMAIL"] = [self._email_value(transaction.email)]
+        if lead_id is not None:
+            lead = await self._bitrix.get_lead(lead_id)
+            parent_id = lead.get("PARENT_ID_1032")
+            if parent_id not in (None, "", 0, "0"):
+                fields["PARENT_ID_1032"] = parent_id
         return await self._bitrix.create_contact(fields)
 
     async def _ensure_email(self, entity_type: str, entity_id: int, email: str | None) -> None:
@@ -137,6 +149,26 @@ class PaymentClientResolver:
             await self._bitrix.update_contact(entity_id, {"EMAIL": emails})
         else:
             await self._bitrix.update_lead(entity_id, {"EMAIL": emails})
+
+    async def _ensure_phone(self, entity_type: str, entity_id: int, phone: str) -> None:
+        entity = await (self._bitrix.get_contact(entity_id) if entity_type == "contact" else self._bitrix.get_lead(entity_id))
+        current = entity.get("PHONE", [])
+        phones = [dict(item) for item in current if isinstance(item, dict)] if isinstance(current, list) else []
+        normalized = self._phone_key(phone)
+        if any(self._phone_key(str(item.get("VALUE", ""))) == normalized for item in phones):
+            return
+        phones.append({"VALUE": phone, "VALUE_TYPE": "WORK"})
+        if entity_type == "contact":
+            await self._bitrix.update_contact(entity_id, {"PHONE": phones})
+        else:
+            await self._bitrix.update_lead(entity_id, {"PHONE": phones})
+
+    @staticmethod
+    def _phone_key(phone: str) -> str:
+        digits = "".join(char for char in phone if char.isdecimal())
+        if len(digits) == 11 and digits.startswith("8"):
+            digits = "7" + digits[1:]
+        return digits
 
     @staticmethod
     def _email_value(email: str) -> dict[str, str]:

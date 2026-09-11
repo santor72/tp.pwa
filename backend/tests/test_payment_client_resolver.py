@@ -36,11 +36,11 @@ class FakeBitrix:
     async def lead_contacts(self, lead_id): return self.relations
     async def find_by_origin(self, entity_type, origin_id): return self.origins.get(f"{entity_type}:{origin_id}", [])
     async def create_lead(self, fields): self.calls.append(("create_lead", fields)); return 20
-    async def create_contact(self, fields): self.calls.append(("create_contact", fields)); return 30
+    async def create_contact(self, fields): self.calls.append(("create_contact", fields)); self.contact_records[30] = dict(fields); return 30
     async def get_contact(self, contact_id): return self.contact_records.get(contact_id, {})
     async def get_lead(self, lead_id): return self.lead_records.get(lead_id, {})
-    async def update_contact(self, contact_id, fields): self.calls.append(("update_contact", contact_id, fields))
-    async def update_lead(self, lead_id, fields): self.calls.append(("update_lead", lead_id, fields))
+    async def update_contact(self, contact_id, fields): self.calls.append(("update_contact", contact_id, fields)); self.contact_records.setdefault(contact_id, {}).update(fields)
+    async def update_lead(self, lead_id, fields): self.calls.append(("update_lead", lead_id, fields)); self.lead_records.setdefault(lead_id, {}).update(fields)
     async def add_contact_to_lead(self, lead_id, contact_id): self.calls.append(("link", lead_id, contact_id))
     async def ensure_contact_on_lead(self, lead_id, contact_id):
         if contact_id not in {int(item.get("CONTACT_ID", item.get("ID", 0))) for item in self.relations}:
@@ -123,10 +123,34 @@ async def test_resolver_uses_lowest_sort_when_lead_has_no_primary_contact() -> N
 @pytest.mark.asyncio
 async def test_resolver_searches_exact_address_then_creates_contact() -> None:
     bitrix = FakeBitrix(); bitrix.address_leads = [{"ID": "15", "TITLE": "Квартира"}]
+    bitrix.lead_records[15] = {"PARENT_ID_1032": "103"}
     result = await PaymentClientResolver(Settings(), bitrix).resolve(transaction(address_id=103, address_text="Полный адрес", apartment="12А"))
     assert (result.contact_id, result.lead_id) == (30, 15)
     assert ("address", 103, "12А") in bitrix.calls
     assert ("link", 15, 30) in bitrix.calls
+    fields = next(call[1] for call in bitrix.calls if call[0] == "create_contact")
+    assert fields["PARENT_ID_1032"] == "103"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("parent_id", [None, "", 0, "0"])
+async def test_new_contact_omits_empty_lead_address(parent_id) -> None:
+    bitrix = FakeBitrix(); bitrix.leads = [15]
+    bitrix.lead_records[15] = {"PARENT_ID_1032": parent_id}
+    await PaymentClientResolver(Settings(), bitrix).resolve(transaction(address_id=103, apartment="12"))
+    fields = next(call[1] for call in bitrix.calls if call[0] == "create_contact")
+    assert "PARENT_ID_1032" not in fields
+
+
+@pytest.mark.asyncio
+async def test_selected_lead_contact_inherits_lead_address_not_form_address() -> None:
+    bitrix = FakeBitrix()
+    bitrix.lead_records[15] = {"PARENT_ID_1032": "4297"}
+    tx = transaction(address_id=103, apartment="349", candidate_snapshot=[{"entity_type": "lead", "entity_id": 15}])
+    result = await PaymentClientResolver(Settings(), bitrix).resolve_selected(tx, "lead", 15)
+    fields = next(call[1] for call in bitrix.calls if call[0] == "create_contact")
+    assert fields["PARENT_ID_1032"] == "4297"
+    assert (result.contact_id, result.lead_id) == (30, 15)
 
 
 @pytest.mark.asyncio
@@ -137,6 +161,37 @@ async def test_resolver_requires_selection_for_multiple_address_leads() -> None:
             transaction(address_id=103, address_text="Полный адрес", apartment="12А"),
         )
     assert [item.entity_id for item in caught.value.candidates] == [15, 16]
+    assert all(item.matched_by == "address" for item in caught.value.candidates)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("selected", [False, True])
+async def test_address_match_appends_phone_to_lead_and_contact(selected) -> None:
+    bitrix = FakeBitrix(); bitrix.address_leads = [{"ID": "15"}]
+    bitrix.relations = [{"CONTACT_ID": 3, "IS_PRIMARY": "Y"}]
+    old = {"ID": "90", "VALUE": "+79000000000", "VALUE_TYPE": "HOME"}
+    bitrix.lead_records[15] = {"PHONE": [dict(old)]}
+    bitrix.contact_records[3] = {"PHONE": [dict(old)]}
+    tx = transaction(address_id=103, apartment="12", candidate_snapshot=[{"entity_type": "lead", "entity_id": 15, "matched_by": "address"}])
+    resolver = PaymentClientResolver(Settings(), bitrix)
+    if selected:
+        await resolver.resolve_selected(tx, "lead", 15)
+    else:
+        await resolver.resolve(tx)
+    expected = [old, {"VALUE": tx.phone_normalized, "VALUE_TYPE": "WORK"}]
+    assert bitrix.lead_records[15]["PHONE"] == expected
+    assert bitrix.contact_records[3]["PHONE"] == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phone", ["+7 (999) 123-45-67", "89991234567", "79991234567"])
+async def test_address_match_does_not_duplicate_equivalent_phone(phone) -> None:
+    bitrix = FakeBitrix(); bitrix.address_leads = [{"ID": "15"}]
+    bitrix.relations = [{"CONTACT_ID": 3}]
+    bitrix.lead_records[15] = {"PHONE": [{"VALUE": phone, "VALUE_TYPE": "HOME"}]}
+    bitrix.contact_records[3] = {"PHONE": [{"VALUE": phone, "VALUE_TYPE": "HOME"}]}
+    await PaymentClientResolver(Settings(), bitrix).resolve(transaction(address_id=103, apartment="12"))
+    assert not any(call[0] in {"update_contact", "update_lead"} for call in bitrix.calls)
 
 
 @pytest.mark.asyncio

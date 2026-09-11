@@ -212,6 +212,7 @@ class PaymentCandidate(BaseModel):
     entity_id: int
     display_name: str
     phone_hint: str | None = None
+    matched_by: Literal["address"] | None = None
 
 
 class PaymentClientSelectionRequest(BaseModel):
