@@ -10,7 +10,7 @@ export type UserProfile = {
   user_permissions: Record<string, unknown>
 }
 
-export type Session = { user: UserProfile; csrf_token: string; capabilities: Capabilities }
+export type Session = { user: UserProfile; csrf_token: string; capabilities: Capabilities; payment_telemetry_enabled?: boolean }
 export type PaymentAddress = { locid: number; loctext: string }
 export type PaymentProduct = { product_id: number; title: string; default_amount: string; currency: string; price_override_allowed: boolean }
 export type PaymentCandidate = { entity_type: 'contact' | 'lead'; entity_id: number; display_name: string; phone_hint?: string | null }
@@ -131,6 +131,9 @@ export const api = {
     body: JSON.stringify(body),
   }),
   payment: (id: string) => request<PaymentTransaction>(`/api/payments/${id}`),
+  paymentTiming: (id: string, body: { accepted_ms?: number; link_ms?: number; qr_ms: number; qr_error: boolean; background: boolean; restored: boolean }, csrfToken: string) => request<void>(`/api/payments/${id}/timing`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken }, body: JSON.stringify(body),
+  }),
   selectPaymentClient: (id: string, candidate: PaymentCandidate, csrfToken: string) => request<PaymentTransaction>(`/api/payments/${id}/client-selection`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
     body: JSON.stringify({ entity_type: candidate.entity_type, entity_id: candidate.entity_id }),

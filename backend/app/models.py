@@ -3,7 +3,7 @@ from datetime import datetime
 
 from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, JSON, Numeric, String, Text, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, JSON, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -111,6 +111,7 @@ class PaymentTransaction(Base):
         Index("ix_payment_transactions_status_next_attempt", "status", "next_attempt_at"),
         Index("ix_payment_transactions_user_created", "user_id", "created_at"),
         Index("ix_payment_transactions_expires", "expires_at"),
+        Index("ix_payment_transactions_created", "created_at"),
     )
 
 
@@ -125,3 +126,18 @@ class PaymentTransactionEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (Index("ix_payment_events_transaction_created", "transaction_id", "created_at"),)
+
+
+class PaymentOperationSpan(Base):
+    __tablename__ = "payment_operation_spans"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    transaction_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("payment_transactions.id", ondelete="CASCADE"), nullable=False)
+    run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    duration_ms: Mapped[float] = mapped_column(Float, nullable=False)
+    outcome: Mapped[str] = mapped_column(String(32), nullable=False)
+    details: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    __table_args__ = (Index("ix_payment_spans_transaction_started", "transaction_id", "started_at"),)

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from '../src/App'
 
 const session = {
+  payment_telemetry_enabled: true,
   user: {
     id: 3,
     email: 'user@example.test',
@@ -59,6 +60,27 @@ afterEach(() => {
 })
 
 describe('Платёжный терминал', () => {
+  it('помечает восстановленный экран и ошибку QR без ошибки для сотрудника', async () => {
+    const id = '3a2cf25b-8daa-4c91-9e86-c0aa3722a68c'
+    sessionStorage.setItem('tp-pwa:active-payment', id)
+    let sent: Record<string, unknown> | undefined
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input)
+      if (path === '/api/auth/session') return json(session)
+      if (path === '/api/tickets/today' || path === '/api/payments/addresses') return json([])
+      if (path.endsWith('/timing')) { sent = JSON.parse(String(init?.body)); throw new Error('offline') }
+      if (path === `/api/payments/${id}`) return json({ id, status: 'send_failed', product_title: 'Товар', actual_amount: '100', currency: 'RUB', payment_url: 'https://pay.example/s', payment_qr: 'https://pay.example/qr.png' })
+      throw new Error(path)
+    }))
+    render(<App />)
+    await screen.findByRole('heading', { name: 'Заявки сегодня' })
+    fireEvent.click(screen.getByRole('button', { name: /Оплата/ }))
+    fireEvent.error(await screen.findByRole('img', { name: 'QR-код оплаты' }))
+    await waitFor(() => expect(sent).toMatchObject({ restored: true, qr_error: true }))
+    expect(screen.queryByText('offline')).toBeNull()
+    expect(screen.getByRole('link', { name: 'Открыть ссылку на оплату' })).toBeTruthy()
+  })
+
   it('показывает инструкцию по оплате с первого шага', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       if (String(input) === '/api/auth/session') return json(session)
@@ -100,11 +122,12 @@ describe('Платёжный терминал', () => {
     expect(screen.queryByRole('heading', { name: 'Оплата' })).toBeNull()
   })
 
-  it('проходит мастер с адресом и показывает ссылку при ошибке SMS', async () => {
+  it.each([true, false, undefined])('проходит мастер с адресом, телеметрия: %s', async (enabled) => {
     let createRequest: RequestInit | undefined
+    let timingRequest: RequestInit | undefined
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input)
-      if (path === '/api/auth/session') return json(session)
+      if (path === '/api/auth/session') return json({ ...session, payment_telemetry_enabled: enabled })
       if (path === '/api/tickets/today') return json([])
       if (path === '/api/payments/addresses') {
         return json([{ locid: 4217, loctext: 'Земская улица, 5' }])
@@ -114,10 +137,11 @@ describe('Платёжный терминал', () => {
         createRequest = init
         return json({ id: '3a2cf25b-8daa-4c91-9e86-c0aa3722a68c', status: 'draft' }, 202)
       }
+      if (path.endsWith('/timing')) { timingRequest = init; return new Response(null, { status: 204 }) }
       if (path === '/api/payments/3a2cf25b-8daa-4c91-9e86-c0aa3722a68c') return json({
         id: '3a2cf25b-8daa-4c91-9e86-c0aa3722a68c', status: 'send_failed', current_step: 'send', send_status: 'send_failed',
         product_title: 'Подключение', catalog_amount: '1500.00', actual_amount: '1700.00', currency: 'RUB',
-        payment_url: 'https://pay.example/full', payment_short_url: 'https://pay.example/s', payment_qr: null,
+        payment_url: 'https://pay.example/full', payment_short_url: 'https://pay.example/s', payment_qr: 'data:image/png;base64,AA==',
         candidates: [], error_code: null, error_message: null, created_at: '2026-09-01T10:00:00Z', updated_at: '2026-09-01T10:00:01Z',
       })
       throw new Error(`Неожиданный запрос: ${path}`)
@@ -149,6 +173,22 @@ describe('Платёжный терминал', () => {
     })
     expect(JSON.parse(String(createRequest?.body)).idempotency_key).toMatch(/^[0-9a-f-]{36}$/)
     expect(new Headers(createRequest?.headers).get('X-CSRF-Token')).toBe('csrf-test')
+    const qr = screen.getByRole('img', { name: 'QR-код оплаты' })
+    fireEvent.load(qr)
+    fireEvent.load(qr)
+    if (!enabled) {
+      expect(timingRequest).toBeUndefined()
+      expect(fetchMock.mock.calls.filter(([path]) => String(path).endsWith('/timing'))).toHaveLength(0)
+      return
+    }
+    await waitFor(() => expect(timingRequest).toBeTruthy())
+    const timingBody = JSON.parse(String(timingRequest?.body))
+    expect(timingBody.restored).toBe(false)
+    expect(timingBody.qr_error).toBe(false)
+    expect(timingBody.accepted_ms).toBeLessThanOrEqual(timingBody.link_ms)
+    expect(timingBody.link_ms).toBeLessThanOrEqual(timingBody.qr_ms)
+    expect(new Headers(timingRequest?.headers).get('X-CSRF-Token')).toBe('csrf-test')
+    expect(fetchMock.mock.calls.filter(([path]) => String(path).endsWith('/timing'))).toHaveLength(1)
   })
 
   it('пропускает адрес и не показывает квартиру', async () => {

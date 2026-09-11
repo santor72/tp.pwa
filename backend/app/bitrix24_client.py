@@ -5,6 +5,7 @@ import httpx
 
 from app.config import Settings
 from app.errors import Bitrix24Error, PaymentsNotConfiguredError
+from app.payment_telemetry import span, current_trace
 
 
 READ_METHOD_PREFIXES = (
@@ -36,15 +37,25 @@ class Bitrix24Client:
         attempts = 3 if is_read else 1
         for attempt in range(attempts):
             try:
-                response = await self._client.post(f"{base}/{method}.json", json=params or {})
+                with span(method, "rest", attempt=attempt + 1) as timing:
+                    response = await self._client.post(f"{base}/{method}.json", json=params or {})
+                    if current_trace.get() is not None:
+                        timing["http_status"] = response.status_code
+                        try:
+                            body = response.json()
+                            timing["api_error"] = isinstance(body, dict) and bool(body.get("error"))
+                        except ValueError:
+                            timing["invalid_json"] = True
             except (httpx.TimeoutException, httpx.NetworkError) as exc:
                 if is_read and attempt + 1 < attempts:
-                    await asyncio.sleep(0.2 * (2 ** attempt))
+                    with span("rest_backoff", "wait", attempt=attempt + 1):
+                        await asyncio.sleep(0.2 * (2 ** attempt))
                     continue
                 raise Bitrix24Error() from exc
             if response.status_code == 429 or response.status_code >= 500:
                 if is_read and attempt + 1 < attempts:
-                    await asyncio.sleep(0.2 * (2 ** attempt))
+                    with span("rest_backoff", "wait", attempt=attempt + 1):
+                        await asyncio.sleep(0.2 * (2 ** attempt))
                     continue
                 code = "BX24_RATE_LIMITED" if response.status_code == 429 else "BX24_UNAVAILABLE"
                 raise Bitrix24Error(code)

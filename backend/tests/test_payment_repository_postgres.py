@@ -62,6 +62,31 @@ def transaction_values(user_id, *, now: datetime, payment_id: int | None = None,
 
 
 @pytest.mark.asyncio
+async def test_telemetry_all_states_stats_filters_and_browser_dedup(repository):
+    repo, user_id = repository
+    now = datetime.now(UTC)
+    created = []
+    for i in range(3):
+        values = transaction_values(user_id, now=now)
+        values["employee_external_id"] = str(user_id)
+        values["next_attempt_at"] = now + timedelta(hours=1)
+        row, _ = await repo.create_or_get(idempotency_key=uuid4(), values=values)
+        created.append(row)
+        span = dict(id=uuid4(), parent_id=None, name="browser_qr", kind="browser", started_at=now,
+            duration_ms=(i + 1) * 1000, outcome="ok", details={"background": i == 2, "restored": False})
+        await repo.save_browser_timing(row.id, [span], uuid4())
+        await repo.save_browser_timing(row.id, [{**span, "id": uuid4()}], uuid4())
+        assert len(await repo.timing_detail(row.id)) == 1
+    rows, spans, total, stats = await repo.timing_list(date_from=now - timedelta(minutes=1), date_to=now + timedelta(minutes=1),
+        phone=None, employee=str(user_id), status="draft", page=1, page_size=1)
+    assert len(rows) == len(spans) == 1
+    assert total == 3
+    assert stats["samples"] == 2  # Statistics cover all pages and exclude background.
+    assert stats["median_ms"] == 1500
+    assert stats["p95_ms"] == 1950
+
+
+@pytest.mark.asyncio
 async def test_postgres_idempotency_worker_claim_and_expiry(repository) -> None:
     payments, user_id = repository
     now = datetime.now(UTC)

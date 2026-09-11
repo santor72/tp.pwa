@@ -1,6 +1,7 @@
 import logging
 import time
 import uuid
+from datetime import UTC, datetime
 from contextlib import asynccontextmanager
 from typing import Literal
 
@@ -28,6 +29,8 @@ from app.session_store import SessionStore
 from app.services import create_application_services
 from app.routers.messengers import router as messengers_router
 from app.routers.payments import router as payments_router
+from app.routers.payment_timings import router as payment_timings_router
+from app.payment_telemetry import Trace, current_trace, span
 
 settings = get_settings()
 configure_logging(settings.log_level)
@@ -59,6 +62,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
 app.include_router(messengers_router)
 app.include_router(payments_router)
+app.include_router(payment_timings_router)
 
 
 @app.middleware("http")
@@ -66,8 +70,14 @@ async def request_logging(request: Request, call_next):
     request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
     token = request_id_ctx.set(request_id)
     started = time.perf_counter()
+    trace = Trace() if settings.payment_telemetry_enabled and request.method == "POST" and request.url.path == "/api/payments" else None
+    trace_token = current_trace.set(trace) if trace else None
+    if trace is not None:
+        request.state.timing_started_at = datetime.now(UTC)
+        request.state.timing_started = started
     try:
-        response = await call_next(request)
+        with span("http_accept", "operation"):
+            response = await call_next(request)
         response.headers["X-Request-ID"] = request_id
         audit(
             logger,
@@ -79,6 +89,9 @@ async def request_logging(request: Request, call_next):
         )
         return response
     finally:
+        if trace_token is not None:
+            current_trace.reset(trace_token)
+            await trace.save(getattr(request.app.state, "payment_repository", None))
         request_id_ctx.reset(token)
 
 
@@ -154,7 +167,7 @@ async def login(payload: LoginRequest, response: Response, request: Request) -> 
     )
     set_session_cookie(response, session_id)
     audit(logger, "auth.login.succeeded", user_id=authenticated.user.id, result="success", session_hash=stable_hash(session_id))
-    return SessionResponse(user=authenticated.user, csrf_token=session.csrf_token, capabilities=capabilities_for(authenticated.user.role, authenticated.user.user_permissions, settings.messenger_show))
+    return SessionResponse(payment_telemetry_enabled=settings.payment_telemetry_enabled, user=authenticated.user, csrf_token=session.csrf_token, capabilities=capabilities_for(authenticated.user.role, authenticated.user.user_permissions, settings.messenger_show))
 
 
 @app.get("/api/auth/session", response_model=SessionResponse)
@@ -165,6 +178,7 @@ async def get_session(
     _, session = session_pair
     return SessionResponse(
         user=session.user,
+        payment_telemetry_enabled=settings.payment_telemetry_enabled,
         csrf_token=session.csrf_token,
         capabilities=capabilities_for(session.user.role, session.user.user_permissions, settings.messenger_show),
     )

@@ -13,6 +13,8 @@ from app.dependencies import actor_from_session, require_csrf, require_session, 
 from app.errors import PermissionDeniedError
 from app.logging import audit, redact
 from app.permissions import has_permission
+from app.payment_telemetry import elapsed, current_trace
+from time import perf_counter
 from app.schemas import (
     PaymentAcceptedResponse,
     PaymentAddress,
@@ -95,6 +97,8 @@ async def products(request: Request, session_pair: tuple[str, SessionData] = Dep
 async def create_payment(payload: PaymentCreateRequest, request: Request, session_pair: tuple[str, SessionData] = Depends(require_csrf)) -> PaymentAcceptedResponse:
     actor = await actor_from_session(request, session_pair[1])
     _require_payments(actor)
+    if current_trace.get() is not None:
+        elapsed(request.state.timing_started_at, "request_validation", duration_ms=(perf_counter() - request.state.timing_started) * 1000)
     response, created = await request.app.state.payment_service.create(actor, session_pair[1].user.first_name, payload)
     audit(
         logger, "payment.request.accepted", user_id=str(actor.user_id), transaction_id=str(response.id),

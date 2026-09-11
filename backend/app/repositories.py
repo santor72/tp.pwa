@@ -8,7 +8,8 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.models import MessengerIdentity, PaymentTransaction, PaymentTransactionEvent, User
+from app.models import MessengerIdentity, PaymentOperationSpan, PaymentTransaction, PaymentTransactionEvent, User
+from app.payment_telemetry import measured
 from app.errors import PaymentStateError
 from app.schemas import UserProfile
 
@@ -94,6 +95,7 @@ class PaymentRepository:
     def __init__(self, sessions: async_sessionmaker[AsyncSession]) -> None:
         self._sessions = sessions
 
+    @measured("db.create", "db")
     async def create_or_get(self, *, idempotency_key: UUID, values: dict) -> tuple[PaymentTransaction, bool]:
         async with self._sessions() as session:
             existing = await session.scalar(select(PaymentTransaction).where(PaymentTransaction.idempotency_key == idempotency_key))
@@ -112,6 +114,7 @@ class PaymentRepository:
             await session.refresh(transaction)
             return transaction, True
 
+    @measured("db.get", "db")
     async def get(self, transaction_id: UUID, user_id: UUID | None = None) -> PaymentTransaction | None:
         async with self._sessions() as session:
             query = select(PaymentTransaction).where(PaymentTransaction.id == transaction_id)
@@ -154,6 +157,7 @@ class PaymentRepository:
             events = list(await session.scalars(select(PaymentTransactionEvent).where(PaymentTransactionEvent.transaction_id == transaction_id).order_by(PaymentTransactionEvent.created_at.asc(), PaymentTransactionEvent.id.asc())))
             return transaction, events
 
+    @measured("db.update", "db")
     async def update(self, transaction_id: UUID, **values) -> PaymentTransaction:
         async with self._sessions() as session:
             transaction = await session.scalar(
@@ -170,6 +174,7 @@ class PaymentRepository:
             await session.refresh(transaction)
             return transaction
 
+    @measured("db.event", "db")
     async def add_event(
         self,
         transaction_id: UUID,
@@ -185,6 +190,49 @@ class PaymentRepository:
                 external_request_id=external_request_id,
             ))
             await session.commit()
+
+    async def save_spans(self, transaction_id, run_id, rows):
+        async with self._sessions() as session:
+            session.add_all([PaymentOperationSpan(transaction_id=transaction_id, run_id=run_id, **row) for row in rows])
+            await session.commit()
+
+    async def timing_detail(self, transaction_id):
+        async with self._sessions() as session:
+            return list(await session.scalars(select(PaymentOperationSpan).where(PaymentOperationSpan.transaction_id == transaction_id).order_by(PaymentOperationSpan.started_at, PaymentOperationSpan.id)))
+
+    async def timing_list(self, *, date_from, date_to, phone, employee, status, page, page_size):
+        filters = [PaymentTransaction.created_at >= date_from, PaymentTransaction.created_at < date_to]
+        if status:
+            filters.append(PaymentTransaction.status == status)
+        digits = ''.join(c for c in (phone or '') if c.isdigit())
+        if digits:
+            filters.append(PaymentTransaction.phone_normalized.like(f"%{digits}%"))
+        if employee:
+            pattern = f"%{employee.strip()}%"
+            filters.append(or_(PaymentTransaction.employee_display_name.ilike(pattern), PaymentTransaction.employee_external_id.ilike(pattern)))
+        async with self._sessions() as session:
+            total = int(await session.scalar(select(func.count()).select_from(PaymentTransaction).where(*filters)) or 0)
+            rows = list(await session.scalars(select(PaymentTransaction).where(*filters).order_by(PaymentTransaction.created_at.desc(), PaymentTransaction.id.desc()).offset((page - 1) * page_size).limit(page_size)))
+            spans = list(await session.scalars(select(PaymentOperationSpan).where(PaymentOperationSpan.transaction_id.in_([row.id for row in rows])))) if rows else []
+            # Aggregate on the server over the complete filtered period, not the page.
+            samples = (select(PaymentOperationSpan.transaction_id, func.min(PaymentOperationSpan.duration_ms).label("ms"))
+                .join(PaymentTransaction, PaymentTransaction.id == PaymentOperationSpan.transaction_id)
+                .where(*filters, PaymentOperationSpan.name == "browser_qr", PaymentOperationSpan.outcome == "ok",
+                       PaymentOperationSpan.details["background"].as_boolean() == False,
+                       PaymentOperationSpan.details["restored"].as_boolean() == False)
+                .group_by(PaymentOperationSpan.transaction_id).subquery())
+            stats = (await session.execute(select(func.count(), func.percentile_cont(0.5).within_group(samples.c.ms), func.percentile_cont(0.95).within_group(samples.c.ms)).select_from(samples))).one()
+            failed = int(await session.scalar(select(func.count()).select_from(PaymentTransaction).where(*filters, PaymentTransaction.status == "failed")) or 0)
+            return rows, spans, total, {"samples": stats[0], "median_ms": stats[1], "p95_ms": stats[2], "failed": failed}
+
+    async def save_browser_timing(self, transaction_id, rows, run_id):
+        # Serialize against this payment: retries/duplicate onLoad do not grow storage.
+        async with self._sessions() as session:
+            await session.scalar(select(PaymentTransaction).where(PaymentTransaction.id == transaction_id).with_for_update())
+            exists = await session.scalar(select(PaymentOperationSpan.id).where(PaymentOperationSpan.transaction_id == transaction_id, PaymentOperationSpan.kind == "browser").limit(1))
+            if exists is None:
+                session.add_all([PaymentOperationSpan(transaction_id=transaction_id, run_id=run_id, **row) for row in rows])
+                await session.commit()
 
     async def claim_batch(self, statuses: set[str], now: datetime, limit: int) -> list[UUID]:
         """Claim work transactionally by moving its retry deadline into the future."""

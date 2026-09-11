@@ -44,6 +44,7 @@ class Capabilities(BaseModel):
 
 
 class SessionResponse(BaseModel):
+    payment_telemetry_enabled: bool = False
     user: UserProfile
     csrf_token: str
     capabilities: Capabilities = Field(default_factory=Capabilities)

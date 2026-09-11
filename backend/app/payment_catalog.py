@@ -5,6 +5,7 @@ from app.cache_store import CacheStore
 from app.config import Settings
 from app.errors import Bitrix24Error, PaymentsNotConfiguredError
 from app.schemas import PaymentProduct
+from app.payment_telemetry import measured, span
 
 
 class PaymentProductCatalog:
@@ -15,10 +16,13 @@ class PaymentProductCatalog:
         self._bitrix = bitrix
         self._cache = cache
 
+    @measured("catalog")
     async def list(self) -> list[PaymentProduct]:
         if not self._settings.bx24_webhook_url or not self._settings.bx24_payment_products:
             raise PaymentsNotConfiguredError()
         cached = await self._cache.get_json(self.cache_key)
+        with span("catalog_cache", "marker", hit=isinstance(cached, list)):
+            pass
         if isinstance(cached, list):
             return [PaymentProduct.model_validate(item) for item in cached]
         products = [await self._load(title, product_id) for title, product_id in self._settings.bx24_payment_products.items()]

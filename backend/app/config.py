@@ -12,6 +12,7 @@ class Settings(BaseSettings):
 
     app_name: str = "ТехПортал PWA API"
     log_level: str = "INFO"
+    payment_telemetry_enabled: bool = False
 
     tp_base_url: str = "https://tp.point.online"
     tp_base_token: str = ""

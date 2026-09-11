@@ -18,6 +18,7 @@ from app.schemas import (
     PaymentTransactionResponse,
 )
 from app.roles import UserRole
+from app.payment_telemetry import elapsed, operation, span, current_trace
 
 
 WORK_STATES = {"draft", "resolving_client", "client_resolved", "invoice_created", "product_added", "payment_created", "link_created"}
@@ -40,6 +41,7 @@ class PaymentService:
         self._resolver = resolver
         self._bitrix = bitrix
 
+    @operation("accept")
     async def create(self, actor: Actor, employee_name: str | None, payload: PaymentCreateRequest) -> tuple[PaymentAcceptedResponse, bool]:
         product = await self._catalog.get(payload.product_id)
         self._validate_amount(payload.amount, product.default_amount)
@@ -69,6 +71,8 @@ class PaymentService:
                 "expires_at": now + timedelta(seconds=self._settings.bx24_payment_expires_seconds),
             },
         )
+        if current_trace.get() is not None:
+            current_trace.get().transaction_id = transaction.id
         if created:
             await self._repository.add_event(transaction.id, "payment.created", {"product_id": product.product_id, "amount": str(payload.amount), "currency": product.currency})
         return PaymentAcceptedResponse(id=transaction.id, status=transaction.status), created
@@ -84,12 +88,17 @@ class PaymentService:
             actual_amount=item.actual_amount, currency=item.currency, created_at=item.created_at,
         ) for item in rows]
 
+    @operation("selection")
     async def select_client(self, actor: Actor, transaction_id: UUID, entity_type: str, entity_id: int) -> PaymentTransactionResponse:
         transaction = await self._owned(actor, transaction_id)
+        if current_trace.get() is not None:
+            current_trace.get().transaction_id = transaction.id
         if transaction.status != "client_selection_required":
             raise PaymentStateError()
+        elapsed(transaction.updated_at, "human_wait")
         try:
-            resolved = await self._resolver.resolve_selected(transaction, entity_type, entity_id)
+            with span("resolve_client"):
+                resolved = await self._resolver.resolve_selected(transaction, entity_type, entity_id)
         except ValueError as exc:
             raise PaymentStateError("Выбранный клиент отсутствует среди кандидатов") from exc
         transaction = await self._repository.update(
@@ -140,78 +149,125 @@ class PaymentService:
         await self._repository.add_event(transaction.id, "payment.canceled", {"payment_id": transaction.bitrix_payment_id})
         return self.to_response(transaction)
 
+    @operation("worker")
     async def process(self, transaction_id: UUID) -> PaymentTransaction:
         transaction = await self._repository.get(transaction_id)
         if transaction is None or transaction.status in TERMINAL_STATES or transaction.status == "client_selection_required":
             if transaction is None:
                 raise PaymentNotFoundError()
             return transaction
+        if transaction.status == "draft" and transaction.current_step == "draft" and not transaction.retry_count:
+            elapsed(transaction.created_at, "initial_queue")
+        elif transaction.last_error_code:
+            elapsed(transaction.updated_at, "retry_wait")
+        elif transaction.status == "client_resolved" and not transaction.bitrix_invoice_id:
+            elapsed(transaction.updated_at, "selection_queue")
+        with span("worker_attempt", "marker", attempt=(transaction.retry_count or 0) + 1):
+            pass
         if transaction.status in {"draft", "resolving_client"} and not transaction.bitrix_contact_id:
-            transaction = await self._repository.update(transaction.id, status="resolving_client", current_step="resolving_client")
-            try:
-                resolved = await self._resolver.resolve(transaction)
-            except AmbiguousClient as exc:
-                snapshot = [candidate.model_dump() for candidate in exc.candidates]
-                transaction = await self._repository.update(transaction.id, status="client_selection_required", current_step="client_selection", candidate_snapshot=snapshot, next_attempt_at=None)
-                await self._repository.add_event(transaction.id, "client.ambiguous", {"candidate_count": len(snapshot)})
-                return transaction
-            transaction = await self._repository.update(transaction.id, bitrix_contact_id=resolved.contact_id, bitrix_lead_id=resolved.lead_id, status="client_resolved", current_step="client_resolved", last_error_code=None, last_error_message=None)
-            await self._repository.add_event(transaction.id, "client.resolved", {"contact_id": resolved.contact_id, "lead_id": resolved.lead_id})
+            with span("resolve_client"):
+                transaction = await self._repository.update(transaction.id, status="resolving_client", current_step="resolving_client")
+                try:
+                    resolved = await self._resolver.resolve(transaction)
+                except AmbiguousClient as exc:
+                    snapshot = [candidate.model_dump() for candidate in exc.candidates]
+                    transaction = await self._repository.update(transaction.id, status="client_selection_required", current_step="client_selection", candidate_snapshot=snapshot, next_attempt_at=None)
+                    await self._repository.add_event(transaction.id, "client.ambiguous", {"candidate_count": len(snapshot)})
+                    return transaction
+                transaction = await self._repository.update(transaction.id, bitrix_contact_id=resolved.contact_id, bitrix_lead_id=resolved.lead_id, status="client_resolved", current_step="client_resolved", last_error_code=None, last_error_message=None)
+                await self._repository.add_event(transaction.id, "client.resolved", {"contact_id": resolved.contact_id, "lead_id": resolved.lead_id})
+        else:
+            with span("resolve_client", skipped=True):
+                pass
 
         if not transaction.bitrix_invoice_id:
-            invoice_id = await self._bitrix.find_invoice_by_xml_id(str(transaction.id))
-            if invoice_id is None:
-                invoice_id = await self._bitrix.create_invoice({
-                    "title": f"Оплата {transaction.product_title}", "contactId": transaction.bitrix_contact_id,
-                    "contactIds": [transaction.bitrix_contact_id], "opportunity": str(transaction.actual_amount),
-                    "currencyId": transaction.currency, "xmlId": str(transaction.id),
-                })
-            transaction = await self._repository.update(transaction.id, bitrix_invoice_id=invoice_id, status="invoice_created", current_step="invoice_created")
-            await self._repository.add_event(transaction.id, "invoice.created", {"invoice_id": invoice_id})
+            with span("invoice"):
+                invoice_id = await self._bitrix.find_invoice_by_xml_id(str(transaction.id))
+                if invoice_id is None:
+                    invoice_id = await self._bitrix.create_invoice({
+                        "title": f"Оплата {transaction.product_title}", "contactId": transaction.bitrix_contact_id,
+                        "contactIds": [transaction.bitrix_contact_id], "opportunity": str(transaction.actual_amount),
+                        "currencyId": transaction.currency, "xmlId": str(transaction.id),
+                    })
+                transaction = await self._repository.update(transaction.id, bitrix_invoice_id=invoice_id, status="invoice_created", current_step="invoice_created")
+                await self._repository.add_event(transaction.id, "invoice.created", {"invoice_id": invoice_id})
+        else:
+            with span("invoice", skipped=True):
+                pass
 
         if not transaction.bitrix_product_row_id:
-            row_id = await self._bitrix.find_product_row(transaction.bitrix_invoice_id, transaction.product_id)
-            if row_id is None:
-                row_id = await self._bitrix.add_product_row(transaction.bitrix_invoice_id, {
-                    "productId": transaction.product_id, "productName": transaction.product_title,
-                    "price": str(transaction.actual_amount), "quantity": 1,
-                })
-            transaction = await self._repository.update(transaction.id, bitrix_product_row_id=row_id, status="product_added", current_step="product_added")
-            await self._repository.add_event(transaction.id, "product.added", {"product_row_id": row_id})
+            with span("product"):
+                row_id = await self._bitrix.find_product_row(transaction.bitrix_invoice_id, transaction.product_id)
+                if row_id is None:
+                    row_id = await self._bitrix.add_product_row(transaction.bitrix_invoice_id, {
+                        "productId": transaction.product_id, "productName": transaction.product_title,
+                        "price": str(transaction.actual_amount), "quantity": 1,
+                    })
+                transaction = await self._repository.update(transaction.id, bitrix_product_row_id=row_id, status="product_added", current_step="product_added")
+                await self._repository.add_event(transaction.id, "product.added", {"product_row_id": row_id})
+        else:
+            with span("product", skipped=True):
+                pass
 
         if not transaction.bitrix_payment_id:
-            payment_id = await self._bitrix.find_payment(transaction.bitrix_invoice_id)
-            if payment_id is None:
-                payment_id = await self._bitrix.create_payment(transaction.bitrix_invoice_id)
-            transaction = await self._repository.update(transaction.id, bitrix_payment_id=payment_id, status="payment_created", current_step="payment_created")
-            await self._repository.add_event(transaction.id, "payment_document.created", {"payment_id": payment_id})
+            with span("payment_document"):
+                payment_id = await self._bitrix.find_payment(transaction.bitrix_invoice_id)
+                if payment_id is None:
+                    payment_id = await self._bitrix.create_payment(transaction.bitrix_invoice_id)
+                transaction = await self._repository.update(transaction.id, bitrix_payment_id=payment_id, status="payment_created", current_step="payment_created")
+                await self._repository.add_event(transaction.id, "payment_document.created", {"payment_id": payment_id})
+        else:
+            with span("payment_document", skipped=True):
+                pass
 
         if not transaction.payment_product_linked:
-            linked = await self._bitrix.payment_product_linked(transaction.bitrix_payment_id, transaction.bitrix_product_row_id)
-            if not linked:
-                await self._bitrix.add_payment_product(transaction.bitrix_payment_id, transaction.bitrix_product_row_id)
-            transaction = await self._repository.update(transaction.id, payment_product_linked=True)
-            await self._repository.add_event(transaction.id, "payment.product_linked", {"product_row_id": transaction.bitrix_product_row_id})
+            with span("payment_product"):
+                linked = await self._bitrix.payment_product_linked(transaction.bitrix_payment_id, transaction.bitrix_product_row_id)
+                if not linked:
+                    await self._bitrix.add_payment_product(transaction.bitrix_payment_id, transaction.bitrix_product_row_id)
+                transaction = await self._repository.update(transaction.id, payment_product_linked=True)
+                await self._repository.add_event(transaction.id, "payment.product_linked", {"product_row_id": transaction.bitrix_product_row_id})
+        else:
+            with span("payment_product", skipped=True):
+                pass
 
         if not transaction.payment_url and not transaction.payment_short_url:
-            links = await self._bitrix.payment_public_url(transaction.bitrix_payment_id)
-            transaction = await self._repository.update(
-                transaction.id, payment_url=links["url"], payment_short_url=links["short_url"], payment_qr=links["qr"],
-                status="link_created", current_step="link_created",
-            )
-            await self._repository.add_event(transaction.id, "payment.link_created")
+            with span("public_link"):
+                links = await self._bitrix.payment_public_url(transaction.bitrix_payment_id)
+                transaction = await self._repository.update(
+                    transaction.id, payment_url=links["url"], payment_short_url=links["short_url"], payment_qr=links["qr"],
+                    status="link_created", current_step="link_created",
+                )
+                elapsed(transaction.created_at, "link_ready")
+                await self._repository.add_event(transaction.id, "payment.link_created")
+        else:
+            with span("public_link", skipped=True):
+                pass
 
         if not transaction.formation_timeline_created:
-            await self._formation_timeline(transaction)
-            transaction = await self._repository.update(transaction.id, formation_timeline_created=True)
+            with span("timeline"):
+                await self._formation_timeline(transaction)
+                transaction = await self._repository.update(transaction.id, formation_timeline_created=True)
+        else:
+            with span("timeline", skipped=True):
+                pass
 
         if transaction.status == "link_created":
-            send_status = await self._trigger_send(transaction)
-            transaction = await self._repository.update(transaction.id, status=send_status, current_step="send", send_status=send_status, next_attempt_at=datetime.now(UTC) + timedelta(seconds=self._settings.bx24_payment_poll_interval_seconds))
-            await self._repository.add_event(transaction.id, "payment.send_state", {"send_status": send_status})
+            with span("send"):
+                send_status = await self._trigger_send(transaction)
+                transaction = await self._repository.update(transaction.id, status=send_status, current_step="send", send_status=send_status, next_attempt_at=datetime.now(UTC) + timedelta(seconds=self._settings.bx24_payment_poll_interval_seconds))
+                await self._repository.add_event(transaction.id, "payment.send_state", {"send_status": send_status})
+        else:
+            with span("send", skipped=True):
+                pass
+
         if transaction.status in POLL_STATES and not transaction.formation_activity_created:
-            await self._formation_activity(transaction)
-            transaction = await self._repository.update(transaction.id, formation_activity_created=True)
+            with span("activity"):
+                await self._formation_activity(transaction)
+                transaction = await self._repository.update(transaction.id, formation_activity_created=True)
+        else:
+            with span("activity", skipped=True):
+                pass
         if transaction.last_error_code or transaction.last_error_message:
             transaction = await self._repository.update(
                 transaction.id,
@@ -220,6 +276,7 @@ class PaymentService:
             )
         return transaction
 
+    @operation("retry_schedule")
     async def mark_failure(self, transaction_id: UUID, exc: Exception) -> PaymentTransaction:
         transaction = await self._repository.get(transaction_id)
         if transaction is None:
@@ -227,6 +284,8 @@ class PaymentService:
         retry_count = transaction.retry_count + 1
         retryable = retry_count <= self._settings.bx24_worker_max_retries
         delay = min(300, 2 ** min(retry_count, 8))
+        with span("retry_delay", "marker", scheduled_seconds=delay if retryable else None, attempt=retry_count):
+            pass
         code = exc.code if isinstance(exc, ApiError) else "PAYMENT_PROCESSING_FAILED"
         return await self._repository.update(
             transaction_id, status=transaction.status if retryable else "failed",

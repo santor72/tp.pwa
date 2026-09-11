@@ -180,6 +180,27 @@ function Payments({ session }: { session: Session }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [showInstructions, setShowInstructions] = useState(false)
+  const telemetryEnabled = session.payment_telemetry_enabled === true
+  const timing = useRef<{ start: number; accepted?: number; link?: number; sent: boolean; background: boolean; restored: boolean }>({
+    start: telemetryEnabled ? performance.now() : 0, sent: false, background: document.hidden, restored: true,
+  })
+  useEffect(() => {
+    if (!telemetryEnabled) return
+    const trackVisibility = () => { if (document.hidden) timing.current.background = true }
+    document.addEventListener('visibilitychange', trackVisibility)
+    return () => document.removeEventListener('visibilitychange', trackVisibility)
+  }, [telemetryEnabled])
+
+  function reportQr(qrError: boolean) {
+    const measurement = timing.current
+    if (!telemetryEnabled || !transactionId || measurement.sent) return
+    measurement.sent = true
+    void api.paymentTiming(transactionId, {
+      accepted_ms: measurement.accepted, link_ms: measurement.link,
+      qr_ms: performance.now() - measurement.start, qr_error: qrError,
+      background: measurement.background, restored: measurement.restored,
+    }, session.csrf_token).catch(() => { /* Telemetry must never interrupt payment. */ })
+  }
 
   const visibleLocations = useMemo(() => {
     const query = locationSearch.trim().toLocaleLowerCase('ru')
@@ -201,6 +222,9 @@ function Payments({ session }: { session: Session }) {
       try {
         const value = await api.payment(transactionId)
         if (!active) return
+        if (telemetryEnabled && (value.payment_short_url || value.payment_url) && timing.current.link === undefined) {
+          timing.current.link = performance.now() - timing.current.start
+        }
         setTransaction(value)
         setError('')
         if (value.status === 'client_selection_required') setScreen('ambiguous')
@@ -213,7 +237,7 @@ function Payments({ session }: { session: Session }) {
     }
     poll()
     return () => { active = false; if (timer) clearTimeout(timer) }
-  }, [transactionId])
+  }, [transactionId, telemetryEnabled])
 
   function reset() {
     setScreen('address')
@@ -258,6 +282,7 @@ function Payments({ session }: { session: Session }) {
   async function submit(event: FormEvent) {
     event.preventDefault()
     if (!selectedProduct) return
+    if (telemetryEnabled) timing.current = { start: performance.now(), sent: false, background: document.hidden, restored: false }
     setLoading(true)
     setError('')
     try {
@@ -268,6 +293,7 @@ function Payments({ session }: { session: Session }) {
         first_name: firstName.trim(), second_name: secondName.trim() || undefined,
         last_name: lastName.trim(), phone: paymentPhoneE164(phone), email: email.trim() || undefined, amount: amount.replace(',', '.'),
       }, session.csrf_token)
+      if (telemetryEnabled) timing.current.accepted = performance.now() - timing.current.start
       setTransactionId(response.id)
       setScreen('progress')
     } catch (cause) {
@@ -390,7 +416,7 @@ function Payments({ session }: { session: Session }) {
         : transaction.status === 'send_failed'
           ? 'SMS не настроено — передайте ссылку клиенту'
           : 'Ссылка поставлена в очередь отправки'
-    return <section className="step-content"><div className="step-heading"><h1>{heading}</h1><p>{transaction.product_title} · {transaction.actual_amount} {transaction.currency}</p></div>{error && <ErrorBox text={error} />}<div className="panel payment-result"><div className="success-icon">{paid ? '✓' : stopped && !link ? '!' : '₽'}</div><strong>{notice}</strong>{stopped && !link && <small>ID операции: {transaction.id}</small>}{transaction.payment_qr && <img className="payment-qr" src={transaction.payment_qr} alt="QR-код оплаты" />}{link && <a className="payment-link" href={link} target="_blank" rel="noreferrer">Открыть ссылку на оплату</a>}</div>{!paid && link && <button className="outline-button" disabled={loading} onClick={resend}>{loading ? 'Отправка…' : 'Отправить повторно'}</button>}{!paid && !stopped && <button className="outline-button danger-button" disabled={loading} onClick={cancelPayment}>Отменить оплату</button>}<button className="primary-button" onClick={reset}>Новая оплата</button></section>
+    return <section className="step-content"><div className="step-heading"><h1>{heading}</h1><p>{transaction.product_title} · {transaction.actual_amount} {transaction.currency}</p></div>{error && <ErrorBox text={error} />}<div className="panel payment-result"><div className="success-icon">{paid ? '✓' : stopped && !link ? '!' : '₽'}</div><strong>{notice}</strong>{stopped && !link && <small>ID операции: {transaction.id}</small>}{transaction.payment_qr && <img className="payment-qr" src={transaction.payment_qr} alt="QR-код оплаты" onLoad={() => reportQr(false)} onError={() => reportQr(true)} />}{link && <a className="payment-link" href={link} target="_blank" rel="noreferrer">Открыть ссылку на оплату</a>}</div>{!paid && link && <button className="outline-button" disabled={loading} onClick={resend}>{loading ? 'Отправка…' : 'Отправить повторно'}</button>}{!paid && !stopped && <button className="outline-button danger-button" disabled={loading} onClick={cancelPayment}>Отменить оплату</button>}<button className="primary-button" onClick={reset}>Новая оплата</button></section>
   }
   return <section className="step-content"><div className="step-heading"><h1>Формируем оплату</h1><p>Не закрывайте экран</p></div>{error && <ErrorBox text={error} />}<div className="panel payment-progress"><span className="spinner" aria-hidden="true" /><strong>{transaction?.current_step === 'resolving_client' ? 'Ищем клиента…' : transaction?.current_step === 'invoice_created' ? 'Добавляем товар…' : transaction?.current_step === 'product_added' ? 'Создаём оплату…' : transaction?.current_step === 'payment_created' ? 'Формируем ссылку…' : 'Создаём платёжный документ…'}</strong></div></section>
 }
