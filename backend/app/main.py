@@ -1,4 +1,5 @@
 import logging
+import asyncio
 import time
 import uuid
 from datetime import UTC, datetime
@@ -31,6 +32,7 @@ from app.routers.messengers import router as messengers_router
 from app.routers.payments import router as payments_router
 from app.routers.payment_timings import router as payment_timings_router
 from app.payment_telemetry import Trace, current_trace, span
+from app.payment_runtime_registry import PaymentRuntimeRegistry
 
 settings = get_settings()
 configure_logging(settings.log_level)
@@ -53,10 +55,24 @@ async def lifespan(app: FastAPI):
     app.state.payment_status = app.state.services.payment_status
     app.state.ticket_service = app.state.services.ticket_service
     app.state.messenger_links = app.state.services.messenger_links
-    yield
-    await app.state.services.close()
-    await session_redis.aclose()
-    await cache_redis.aclose()
+    registry = PaymentRuntimeRegistry(app.state.services.sessions, settings.payment_processing_mode)
+    app.state.payment_runtime_registry = registry
+    owner = 'api:' + uuid.uuid4().hex
+    stop = asyncio.Event()
+    await registry.register(owner, 'api')
+    heartbeat = asyncio.create_task(registry.heartbeat(owner, 'api', stop))
+    try:
+        yield
+    finally:
+        stop.set()
+        heartbeat.cancel()
+        await asyncio.gather(heartbeat, return_exceptions=True)
+        try:
+            await registry.unregister(owner)
+        finally:
+            await app.state.services.close()
+            await session_redis.aclose()
+            await cache_redis.aclose()
 
 
 app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
@@ -142,6 +158,9 @@ async def health_live() -> dict[str, str]:
 @app.get("/health/ready")
 async def health_ready(request: Request) -> dict[str, str]:
     try:
+        registry = getattr(request.app.state, 'payment_runtime_registry', None)
+        if registry is not None and not await registry.healthy('api'):
+            raise ApiError(503, 'PAYMENT_RUNTIME_UNHEALTHY', 'Обработчик платежей недоступен')
         await request.app.state.session_redis.ping()
         await request.app.state.cache_redis.ping()
         async with request.app.state.services.engine.connect() as connection:

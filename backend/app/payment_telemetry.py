@@ -13,7 +13,7 @@ current_trace = ContextVar("payment_trace", default=None)
 current_parent = ContextVar("payment_span_parent", default=None)
 
 
-def elapsed(started_at, name, *, duration_ms=None):
+def elapsed(started_at, name, *, duration_ms=None, **metadata):
     trace = current_trace.get()
     if trace is None or len(trace.rows) >= 500:
         return
@@ -21,7 +21,7 @@ def elapsed(started_at, name, *, duration_ms=None):
     if duration_ms is None:
         duration_ms = (datetime.now(UTC) - started_at).total_seconds() * 1000
     trace.rows.append(dict(id=uuid4(), parent_id=current_parent.get(), name=name, kind="interval",
-        started_at=started_at, duration_ms=max(0, duration_ms), outcome="ok", details={}))
+        started_at=started_at, duration_ms=max(0, duration_ms), outcome="ok", details=metadata))
 
 
 class Trace:

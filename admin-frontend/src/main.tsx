@@ -15,6 +15,6 @@ function Registry({session,onLogout}:{session:Session;onLogout:()=>void}) { cons
 function App(props: { session: Session; onLogout: () => void }) {
   const [tab, setTab] = useState('registry')
   if (!props.session.capabilities.payment_admin) return <main className="center">Доступ запрещён. Нужна роль администратора.</main>
-  return <><nav className="shell"><button onClick={() => setTab('registry')}>Реестр оплат</button><button onClick={() => setTab('timings')}>Скорость формирования</button>{tab === 'timings' && <button onClick={props.onLogout}>Выйти</button>}</nav>{tab === 'registry' ? <Registry {...props} /> : <Timings />}</>
+  return <><nav className="shell"><button onClick={() => setTab('registry')}>Реестр оплат</button><button onClick={() => setTab('timings')}>Скорость формирования</button>{tab === 'timings' && <button onClick={props.onLogout}>Выйти</button>}</nav>{tab === 'registry' ? <Registry {...props} /> : <Timings csrf={props.session.csrf_token} />}</>
 }
 function Root(){const [session,setSession]=useState<Session|null>(null),[loading,setLoading]=useState(true);useEffect(()=>{api.session().then(setSession).catch(()=>{}).finally(()=>setLoading(false))},[]);if(loading)return <main className="center">Загрузка…</main>;if(!session)return <Login onLogin={setSession}/>;return <App session={session} onLogout={()=>api.logout(session.csrf_token).then(()=>setSession(null))}/>};createRoot(document.getElementById('root')!).render(<Root/>)

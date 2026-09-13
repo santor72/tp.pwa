@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 from urllib.parse import urlsplit
 
 from decimal import Decimal
@@ -13,6 +14,36 @@ class Settings(BaseSettings):
     app_name: str = "ТехПортал PWA API"
     log_level: str = "INFO"
     payment_telemetry_enabled: bool = False
+    payment_processing_mode: Literal["legacy", "events"] = "legacy"
+    payment_events_redis_url: str = "redis://redis:6379/3"
+    payment_events_prefix: str = "tp-pwa"
+    payment_outbox_poll_seconds: float = Field(default=1, gt=0, le=30)
+    payment_recovery_interval_seconds: float = Field(default=30, gt=0)
+    payment_lease_seconds: float = Field(default=90, gt=0)
+    payment_heartbeat_seconds: float = Field(default=15, gt=0)
+    payment_reclaim_idle_ms: int = Field(default=90000, gt=0)
+    payment_shutdown_grace_seconds: float = Field(default=30, gt=0)
+    payment_formation_concurrency: int = Field(default=1, ge=1, le=32)
+    payment_reconciliation_concurrency: int = Field(default=1, ge=1, le=32)
+    payment_bitrix_requests_per_second: float = Field(default=1, gt=0, le=100)
+    payment_bitrix_cooldown_seconds: float = Field(default=30, gt=0)
+    payment_stream_retention_enabled: bool = False
+    payment_stream_retention_days: int = Field(default=30, ge=1)
+    payment_stream_retention_batch_size: int = Field(default=50, ge=1, le=100)
+    payment_stream_retention_interval_seconds: float = Field(default=600, gt=0)
+    payment_job_retention_enabled: bool = False
+    payment_job_retention_days: int = Field(default=30, ge=1)
+    payment_job_retention_batch_size: int = Field(default=50, ge=1, le=100)
+    payment_job_retention_interval_seconds: float = Field(default=600, gt=0)
+
+    @model_validator(mode="after")
+    def validate_payment_events(self):
+        if self.payment_heartbeat_seconds * 3 > self.payment_lease_seconds:
+            raise ValueError("Payment lease must cover at least three heartbeat intervals")
+        prefix = self.payment_events_prefix
+        if not prefix or len(prefix) > 64 or not all(c.isascii() and (c.isalnum() or c in '-_:') for c in prefix):
+            raise ValueError("Invalid payment events prefix")
+        return self
 
     tp_base_url: str = "https://tp.point.online"
     tp_base_token: str = ""
@@ -60,6 +91,7 @@ class Settings(BaseSettings):
     bx24_payment_allow_price_override: bool = True
     bx24_payment_link_field: str = ""
     bx24_payment_send_trigger: str = ""
+    bx24_payment_create_activity: bool = False
     bx24_payment_webhook_token: SecretStr = SecretStr("")
     bx24_payment_poll_interval_seconds: int = Field(default=30, gt=0)
     bx24_payment_expires_seconds: int = Field(default=86400, gt=0)
@@ -67,6 +99,9 @@ class Settings(BaseSettings):
     bx24_timeout_seconds: float = Field(default=20.0, gt=0)
     bx24_worker_batch_size: int = Field(default=10, gt=0, le=100)
     bx24_worker_max_retries: int = Field(default=8, ge=0, le=50)
+    payment_health_interval_seconds: float = Field(default=30, gt=0)
+    payment_health_due_age_seconds: float = Field(default=120, gt=0)
+    payment_health_outbox_age_seconds: float = Field(default=10, gt=0)
 
     allowed_origins: str = "http://localhost:8080"
 

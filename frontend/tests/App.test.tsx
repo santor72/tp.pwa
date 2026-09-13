@@ -225,6 +225,64 @@ describe('Платёжный терминал', () => {
     expect(screen.getByRole('button', { name: /Лесная/ })).toBeTruthy()
   })
 
+  it.each(['cancel', 'resend'])('восстанавливает ожидание %s и блокирует повторные команды', async command => {
+    const id = '3a2cf25b-8daa-4c91-9e86-c0aa3722a68c'
+    sessionStorage.setItem('tp-pwa:active-payment', id)
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input)
+      if (path === '/api/auth/session') return json(session)
+      if (path === '/api/tickets/today' || path === '/api/payments/addresses') return json([])
+      if (path === `/api/payments/${id}`) return json({
+        id, status: 'sent', current_step: 'send', pending_commands: [command], send_status: 'sent',
+        product_title: 'Услуга', catalog_amount: '10.00', actual_amount: '10.00', currency: 'RUB',
+        payment_url: 'https://pay.example/test', payment_short_url: null, payment_qr: 'data:image/png;base64,AA==',
+        candidates: [], error_code: null, error_message: null,
+        created_at: '2026-09-01T10:00:00Z', updated_at: '2026-09-01T10:00:01Z',
+      })
+      throw new Error(`Неожиданный запрос: ${path}`)
+    }))
+    render(<App />)
+    await openPayments()
+    expect(await screen.findByText(command === 'cancel' ? /Отмена принята/ : /Повторная отправка принята/)).toBeTruthy()
+    if (command === 'cancel') {
+      expect(screen.queryByRole('img', { name: 'QR-код оплаты' })).toBeNull()
+      expect(screen.queryByRole('link', { name: 'Открыть ссылку на оплату' })).toBeNull()
+    } else {
+      expect(screen.getByRole('img', { name: 'QR-код оплаты' })).toBeTruthy()
+    }
+    for (const name of ['Отправить повторно', 'Отменить оплату', 'Новая оплата']) {
+      expect((screen.getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(true)
+    }
+  })
+
+  it.each(['select', 'resume'])('показывает очередь %s и продолжает polling до QR', async command => {
+    const id = '3a2cf25b-8daa-4c91-9e86-c0aa3722a68c'
+    sessionStorage.setItem('tp-pwa:active-payment', id)
+    let finished = false
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input)
+      if (path === '/api/auth/session') return json(session)
+      if (path === '/api/tickets/today' || path === '/api/payments/addresses') return json([])
+      if (path === `/api/payments/${id}`) return json({
+        id, status: finished ? 'send_queued' : 'resolving_client', current_step: finished ? 'send' : `${command}_queued`,
+        pending_commands: finished ? [] : [command], send_status: null,
+        product_title: 'Услуга', catalog_amount: '10.00', actual_amount: '10.00', currency: 'RUB',
+        payment_url: finished ? 'https://pay.example/test' : null, payment_short_url: null,
+        payment_qr: finished ? 'data:image/png;base64,AA==' : null,
+        candidates: [], error_code: null, error_message: null,
+        created_at: '2026-09-01T10:00:00Z', updated_at: '2026-09-01T10:00:01Z',
+      })
+      throw new Error(`Неожиданный запрос: ${path}`)
+    }))
+    render(<App />)
+    await openPayments()
+    expect(await screen.findByText(command === 'select' ? /Клиент выбран/ : /Повторная обработка принята/)).toBeTruthy()
+    expect(screen.queryByRole('img', { name: 'QR-код оплаты' })).toBeNull()
+    finished = true
+    expect(await screen.findByRole('img', { name: 'QR-код оплаты' }, { timeout: 4000 })).toBeTruthy()
+    expect(screen.queryByText(/Ожидаем продолжения формирования оплаты/)).toBeNull()
+  })
+
   it('останавливает polling и показывает ID окончательно неуспешной операции', async () => {
     const id = '3a2cf25b-8daa-4c91-9e86-c0aa3722a68c'
     sessionStorage.setItem('tp-pwa:active-payment', id)

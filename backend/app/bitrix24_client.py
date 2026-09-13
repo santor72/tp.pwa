@@ -1,4 +1,5 @@
 import asyncio
+import json
 from typing import Any
 
 import httpx
@@ -6,6 +7,7 @@ import httpx
 from app.config import Settings
 from app.errors import Bitrix24Error, PaymentsNotConfiguredError
 from app.payment_telemetry import span, current_trace
+from app.payment_execution import current_execution
 
 
 READ_METHOD_PREFIXES = (
@@ -24,18 +26,46 @@ class Bitrix24Client:
         self._settings = settings
         self._owns_client = client is None
         self._client = client or httpx.AsyncClient(timeout=settings.bx24_timeout_seconds)
+        self.limiter = None
 
     async def close(self) -> None:
         if self._owns_client:
             await self._client.aclose()
 
     async def call(self, method: str, params: dict[str, Any] | None = None, *, read: bool | None = None) -> Any:
+        execution = current_execution.get()
+        is_read = method.startswith(READ_METHOD_PREFIXES) if read is None else read
+        params = params or {}
+        if execution is not None:
+            await execution.check()
+            if not is_read:
+                cached = await execution.before_write(method, params)
+                if cached is not None:
+                    return json.loads(cached)
+        try:
+            result = await self._call(method, params, read=is_read)
+        except Bitrix24Error as exc:
+            if execution is not None and not is_read and exc.code in {
+                "BX24_RATE_LIMITED", "BX24_VALIDATION_FAILED", "BX24_ACCESS_DENIED", "BX24_AUTH_FAILED", "BX24_HTTP_ERROR",
+            }:
+                await execution.repository.reject_write(execution.claim, execution.marker(method, params))
+            raise
+        if execution is not None and not is_read:
+            await execution.after_write(method, params, result)
+        return result
+
+    async def _call(self, method: str, params: dict[str, Any] | None = None, *, read: bool | None = None) -> Any:
         base = self._settings.bx24_webhook_url
         if not base:
             raise PaymentsNotConfiguredError()
         is_read = method.startswith(READ_METHOD_PREFIXES) if read is None else read
         attempts = 3 if is_read else 1
         for attempt in range(attempts):
+            if self.limiter is not None:
+                await self.limiter.acquire()
+            execution = current_execution.get()
+            if execution is not None:
+                await execution.check()
             try:
                 with span(method, "rest", attempt=attempt + 1) as timing:
                     response = await self._client.post(f"{base}/{method}.json", json=params or {})
@@ -53,6 +83,8 @@ class Bitrix24Client:
                     continue
                 raise Bitrix24Error() from exc
             if response.status_code == 429 or response.status_code >= 500:
+                if response.status_code == 429 and self.limiter is not None:
+                    await self.limiter.limited()
                 if is_read and attempt + 1 < attempts:
                     with span("rest_backoff", "wait", attempt=attempt + 1):
                         await asyncio.sleep(0.2 * (2 ** attempt))
@@ -63,6 +95,8 @@ class Bitrix24Client:
                 raise Bitrix24Error("BX24_AUTH_FAILED", "Не удалось авторизоваться в Битрикс24")
             if response.status_code == 403:
                 raise Bitrix24Error("BX24_ACCESS_DENIED", "Битрикс24 отклонил операцию", 403)
+            if not response.is_success:
+                raise Bitrix24Error("BX24_HTTP_ERROR", "Битрикс24 отклонил запрос")
             try:
                 payload = response.json()
             except ValueError as exc:

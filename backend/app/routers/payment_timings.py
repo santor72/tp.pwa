@@ -85,7 +85,8 @@ async def timing_list(request: Request, date_from: str | None = None, date_to: s
     for item in spans:
         grouped.setdefault(item.transaction_id, []).append(item)
     audit(logger, "payment.admin.timings.viewed", user_id=str(admin[2].user_id), count=total)
-    return dict(items=[summary(row, grouped.get(row.id, [])) for row in rows], total=total, page=page, page_size=page_size, stats=stats)
+    jobs = await request.app.state.payment_repository.job_diagnostics([row.id for row in rows]) if rows else []
+    return dict(items=[dict(**summary(row, grouped.get(row.id, [])), job_issues=[job for job in jobs if job['transaction_id'] == row.id and job['state'] in {'failed', 'needs_reconciliation'}]) for row in rows], total=total, page=page, page_size=page_size, stats=stats)
 
 
 @router.get("/api/admin/payment-timings/{transaction_id}")
@@ -96,5 +97,18 @@ async def timing_detail(transaction_id: UUID, request: Request, admin=Depends(re
         raise ApiError(404, "PAYMENT_NOT_FOUND", "Операция не найдена")
     spans = await repo.timing_detail(transaction_id)
     audit(logger, "payment.admin.timing.viewed", user_id=str(admin[2].user_id), transaction_id=str(transaction_id))
-    return dict(**summary(row, spans), spans=[dict(id=s.id, parent_id=s.parent_id, run_id=s.run_id,
+    return dict(**summary(row, spans), jobs=await repo.job_diagnostics([transaction_id]), spans=[dict(id=s.id, parent_id=s.parent_id, run_id=s.run_id,
         name=s.name, kind=s.kind, started_at=s.started_at, duration_ms=s.duration_ms, outcome=s.outcome, details=s.details) for s in spans])
+
+
+@router.post('/api/admin/payment-jobs/{job_id}/retry', status_code=202)
+async def retry_job(job_id: UUID, request: Request, admin=Depends(require_admin), csrf=Depends(require_csrf)):
+    repo = request.app.state.payment_repository.event_queue
+    new_id = await repo.retry_job(job_id, admin[2].user_id)
+    return {'job_id': new_id}
+
+
+@router.get('/api/admin/payment-jobs/health')
+async def job_health(request: Request, admin=Depends(require_admin), settings: Settings = Depends(get_settings)):
+    from app.payment_health import queue_health
+    return await queue_health(request.app.state.payment_repository.event_queue.sessions, settings)

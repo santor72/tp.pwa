@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from 'react'
+import { paymentCommands } from './paymentCommands'
 
 import {
   api,
@@ -230,7 +231,7 @@ function Payments({ session }: { session: Session }) {
         if (value.status === 'client_selection_required') setScreen('ambiguous')
         else if (value.payment_short_url || value.payment_url || ['send_failed', 'send_queued', 'sent', 'paid', 'failed', 'expired', 'canceled'].includes(value.status)) setScreen('result')
         else setScreen('progress')
-        if (!['paid', 'failed', 'expired', 'canceled'].includes(value.status)) timer = setTimeout(poll, 2500)
+        if (paymentCommands(value).pending || !['paid', 'failed', 'expired', 'canceled'].includes(value.status)) timer = setTimeout(poll, 2500)
       } catch (cause) {
         if (active) { setError(errorMessage(cause)); timer = setTimeout(poll, 4000) }
       }
@@ -405,6 +406,7 @@ function Payments({ session }: { session: Session }) {
     return <section className="step-content"><div className="step-heading"><h1>Уточните клиента</h1><p>Найдено несколько совпадений</p></div>{error && <ErrorBox text={error} />}<div className="product-grid">{transaction.candidates.map(candidate => <button className="panel product-card" disabled={loading} key={`${candidate.entity_type}-${candidate.entity_id}`} onClick={() => selectCandidate(candidate)}><strong>{candidate.display_name}</strong><span>{candidate.entity_type === 'contact' ? 'Контакт' : 'Лид'}</span></button>)}</div></section>
   }
   if (screen === 'result' && transaction) {
+    const command = paymentCommands(transaction)
     const link = transaction.payment_short_url || transaction.payment_url
     const paid = transaction.status === 'paid'
     const stopped = ['failed', 'expired', 'canceled'].includes(transaction.status)
@@ -416,9 +418,25 @@ function Payments({ session }: { session: Session }) {
         : transaction.status === 'send_failed'
           ? 'SMS не настроено — передайте ссылку клиенту'
           : 'Ссылка поставлена в очередь отправки'
-    return <section className="step-content"><div className="step-heading"><h1>{heading}</h1><p>{transaction.product_title} · {transaction.actual_amount} {transaction.currency}</p></div>{error && <ErrorBox text={error} />}<div className="panel payment-result"><div className="success-icon">{paid ? '✓' : stopped && !link ? '!' : '₽'}</div><strong>{notice}</strong>{stopped && !link && <small>ID операции: {transaction.id}</small>}{transaction.payment_qr && <img className="payment-qr" src={transaction.payment_qr} alt="QR-код оплаты" onLoad={() => reportQr(false)} onError={() => reportQr(true)} />}{link && <a className="payment-link" href={link} target="_blank" rel="noreferrer">Открыть ссылку на оплату</a>}</div>{!paid && link && <button className="outline-button" disabled={loading} onClick={resend}>{loading ? 'Отправка…' : 'Отправить повторно'}</button>}{!paid && !stopped && <button className="outline-button danger-button" disabled={loading} onClick={cancelPayment}>Отменить оплату</button>}<button className="primary-button" onClick={reset}>Новая оплата</button></section>
+    const hideLink = command.canceling || ['canceled', 'expired'].includes(transaction.status)
+    return <section className="step-content">
+      <div className="step-heading"><h1>{transaction.status === 'canceled' ? 'Оплата отменена' : transaction.status === 'expired' ? 'Срок оплаты истёк' : heading}</h1><p>{transaction.product_title} · {transaction.actual_amount} {transaction.currency}</p></div>
+      {error && <ErrorBox text={error} />}
+      {command.pending && <p role="status">{command.message}</p>}
+      <div className="panel payment-result">
+        <div className="success-icon">{paid ? '✓' : stopped && !link ? '!' : '₽'}</div>
+        <strong>{hideLink ? 'Не используйте прежнюю ссылку для оплаты.' : notice}</strong>
+        {stopped && !link && <small>ID операции: {transaction.id}</small>}
+        {!hideLink && transaction.payment_qr && <img className="payment-qr" src={transaction.payment_qr} alt="QR-код оплаты" onLoad={() => reportQr(false)} onError={() => reportQr(true)} />}
+        {!hideLink && link && <a className="payment-link" href={link} target="_blank" rel="noreferrer">Открыть ссылку на оплату</a>}
+      </div>
+      {!paid && !stopped && link && <button className="outline-button" disabled={loading || command.pending} onClick={resend}>{loading ? 'Отправка…' : 'Отправить повторно'}</button>}
+      {!paid && !stopped && <button className="outline-button danger-button" disabled={loading || command.pending} onClick={cancelPayment}>Отменить оплату</button>}
+      <button className="primary-button" disabled={command.pending} onClick={reset}>Новая оплата</button>
+    </section>
   }
-  return <section className="step-content"><div className="step-heading"><h1>Формируем оплату</h1><p>Не закрывайте экран</p></div>{error && <ErrorBox text={error} />}<div className="panel payment-progress"><span className="spinner" aria-hidden="true" /><strong>{transaction?.current_step === 'resolving_client' ? 'Ищем клиента…' : transaction?.current_step === 'invoice_created' ? 'Добавляем товар…' : transaction?.current_step === 'product_added' ? 'Создаём оплату…' : transaction?.current_step === 'payment_created' ? 'Формируем ссылку…' : 'Создаём платёжный документ…'}</strong></div></section>
+  const pendingCommand = transaction ? paymentCommands(transaction) : null
+  return <section className="step-content"><div className="step-heading"><h1>Формируем оплату</h1><p>Не закрывайте экран</p></div>{error && <ErrorBox text={error} />}{pendingCommand?.pending && <p role="status">{pendingCommand.message}</p>}<div className="panel payment-progress"><span className="spinner" aria-hidden="true" /><strong>{transaction?.current_step === 'resolving_client' ? 'Ищем клиента…' : transaction?.current_step === 'invoice_created' ? 'Добавляем товар…' : transaction?.current_step === 'product_added' ? 'Создаём оплату…' : transaction?.current_step === 'payment_created' ? 'Формируем ссылку…' : 'Создаём платёжный документ…'}</strong></div></section>
 }
 
 function formatDateTime(value: string | null): string {

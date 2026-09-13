@@ -1,0 +1,37 @@
+# Third overlay for the isolated tp-payment-runtime-test project only.
+x-workflow: &workflow
+  environment:
+    BX24_WEBHOOK: http://fake-bitrix:8000/rest/1/test
+    BX24_PAYMENT_WEBHOOK_TOKEN: runtime-callback-test-token
+    BX24_PAYMENT_LINK_FIELD: ufCrmTestLink
+    BX24_PAYMENT_SEND_TRIGGER: stageId=TEST:SEND
+    BX24_PAYMENT_POLL_INTERVAL_SECONDS: '1'
+    PAYMENT_BITRIX_REQUESTS_PER_SECOND: '20'
+  depends_on:
+    fake-bitrix:
+      condition: service_healthy
+
+services:
+  fake-bitrix:
+    image: tp-payment-runtime-test:local
+    command: [uvicorn, runtime_fake_bitrix:app, --app-dir, /test_support, --host, 0.0.0.0, --port, '8000']
+    volumes:
+      - ./backend/tests/runtime_fake_bitrix.py:/test_support/runtime_fake_bitrix.py:ro
+    ports: ['127.0.0.1::8000']
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 3s
+      timeout: 5s
+      retries: 10
+  api:
+    <<: *workflow
+  payment-outbox-relay:
+    <<: *workflow
+  payment-formation-worker:
+    <<: *workflow
+  payment-reconciliation-worker:
+    <<: *workflow
+  payment-recovery-formation:
+    <<: *workflow
+  payment-recovery-reconciliation:
+    <<: *workflow

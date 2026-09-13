@@ -79,7 +79,10 @@ class PaymentService:
 
     async def get(self, actor: Actor, transaction_id: UUID) -> PaymentTransactionResponse:
         transaction = await self._owned(actor, transaction_id)
-        return self.to_response(transaction)
+        response = self.to_response(transaction)
+        if getattr(self._repository, 'event_queue', None) is not None:
+            response.pending_commands = await self._repository.event_queue.pending_commands(transaction_id)
+        return response
 
     async def recent(self, actor: Actor) -> list[PaymentRecentResponse]:
         rows = await self._repository.list_recent(actor.user_id)
@@ -90,6 +93,9 @@ class PaymentService:
 
     @operation("selection")
     async def select_client(self, actor: Actor, transaction_id: UUID, entity_type: str, entity_id: int) -> PaymentTransactionResponse:
+        if getattr(self._repository, 'event_queue', None) is not None:
+            transaction = await self._repository.event_queue.queue_command(transaction_id, actor.user_id, 'select', selection=(entity_type, entity_id))
+            return self.to_response(transaction)
         transaction = await self._owned(actor, transaction_id)
         if current_trace.get() is not None:
             current_trace.get().transaction_id = transaction.id
@@ -109,6 +115,8 @@ class PaymentService:
         return self.to_response(transaction)
 
     async def resend(self, actor: Actor, transaction_id: UUID) -> PaymentTransactionResponse:
+        if getattr(self._repository, 'event_queue', None) is not None:
+            return self.to_response(await self._repository.event_queue.queue_command(transaction_id, actor.user_id, 'resend'))
         transaction = await self._owned(actor, transaction_id)
         if transaction.status in TERMINAL_STATES or transaction.status == "failed":
             raise PaymentStateError("Повторная отправка недоступна для завершённой операции")
@@ -122,6 +130,8 @@ class PaymentService:
     async def resume_failed_as_admin(self, actor: Actor, transaction_id: UUID) -> PaymentTransactionResponse:
         if actor.role is not UserRole.ADMIN:
             raise PermissionDeniedError()
+        if getattr(self._repository, 'event_queue', None) is not None:
+            return self.to_response(await self._repository.event_queue.queue_command(transaction_id, actor.user_id, 'resume', admin=True))
         transaction = await self._repository.get(transaction_id)
         if transaction is None:
             raise PaymentNotFoundError()
@@ -135,6 +145,8 @@ class PaymentService:
         return self.to_response(transaction)
 
     async def cancel(self, actor: Actor, transaction_id: UUID) -> PaymentTransactionResponse:
+        if getattr(self._repository, 'event_queue', None) is not None:
+            return self.to_response(await self._repository.event_queue.queue_command(transaction_id, actor.user_id, 'cancel'))
         transaction = await self._owned(actor, transaction_id)
         if transaction.status in TERMINAL_STATES:
             raise PaymentStateError("Отмена недоступна для завершённой операции")
@@ -150,8 +162,18 @@ class PaymentService:
         return self.to_response(transaction)
 
     @operation("worker")
-    async def process(self, transaction_id: UUID) -> PaymentTransaction:
+    async def process(self, transaction_id: UUID, *, selected=None) -> PaymentTransaction:
         transaction = await self._repository.get(transaction_id)
+        if transaction is not None and transaction.status == 'paid':
+            # A callback can overtake a delayed formation retry. Finish only
+            # audit work: never recreate documents or trigger a payment request.
+            if not transaction.formation_timeline_created:
+                with span('timeline'):
+                    await self._formation_timeline(transaction)
+                    transaction = await self._repository.update(transaction.id, formation_timeline_created=True)
+            if not transaction.formation_activity_created:
+                transaction = await self._complete_formation_activity(transaction)
+            return transaction
         if transaction is None or transaction.status in TERMINAL_STATES or transaction.status == "client_selection_required":
             if transaction is None:
                 raise PaymentNotFoundError()
@@ -168,7 +190,7 @@ class PaymentService:
             with span("resolve_client"):
                 transaction = await self._repository.update(transaction.id, status="resolving_client", current_step="resolving_client")
                 try:
-                    resolved = await self._resolver.resolve(transaction)
+                    resolved = await self._resolver.resolve_selected(transaction, *selected) if selected else await self._resolver.resolve(transaction)
                 except AmbiguousClient as exc:
                     snapshot = [candidate.model_dump() for candidate in exc.candidates]
                     transaction = await self._repository.update(transaction.id, status="client_selection_required", current_step="client_selection", candidate_snapshot=snapshot, next_attempt_at=None)
@@ -262,9 +284,7 @@ class PaymentService:
                 pass
 
         if transaction.status in POLL_STATES and not transaction.formation_activity_created:
-            with span("activity"):
-                await self._formation_activity(transaction)
-                transaction = await self._repository.update(transaction.id, formation_activity_created=True)
+            transaction = await self._complete_formation_activity(transaction)
         else:
             with span("activity", skipped=True):
                 pass
@@ -275,6 +295,26 @@ class PaymentService:
                 last_error_message=None,
             )
         return transaction
+
+    async def execute_command(self, transaction: PaymentTransaction, action: str):
+        """Called only by the fenced job executor; HTTP handlers merely enqueue."""
+        if transaction.status in TERMINAL_STATES:
+            return transaction
+        if action == 'resend':
+            if not transaction.bitrix_invoice_id or not (transaction.payment_url or transaction.payment_short_url):
+                raise PaymentStateError('Платёжная ссылка ещё не сформирована')
+            send_status = await self._trigger_send(transaction, force=True)
+            return await self._repository.update(transaction.id, status=send_status, send_status=send_status, current_step='send')
+        if action == 'cancel':
+            if transaction.bitrix_payment_id:
+                payment = await self._bitrix.get_payment(transaction.bitrix_payment_id)
+                if payment.get('paid', payment.get('PAID')) in {True, 'Y', 1, '1'}:
+                    return transaction  # Executor invokes authoritative reconciliation.
+                await self._bitrix.delete_payment(transaction.bitrix_payment_id)
+            transaction = await self._repository.update(transaction.id, status='canceled', current_step='canceled', next_attempt_at=None)
+            await self._repository.add_event(transaction.id, 'payment.canceled', {'payment_id': transaction.bitrix_payment_id})
+            return transaction
+        raise ValueError('unknown payment command')
 
     @operation("retry_schedule")
     async def mark_failure(self, transaction_id: UUID, exc: Exception) -> PaymentTransaction:
@@ -329,18 +369,34 @@ class PaymentService:
 
     async def _formation_activity(self, transaction: PaymentTransaction) -> None:
         marker = f"Операция ТехПортала: {transaction.id}; событие: payment-link-created"
-        if await self._bitrix.activity_has_marker(marker):
+        if transaction.status == 'paid':
+            activity_id = await self._bitrix.activity_id_by_marker(marker)
+            if activity_id is not None:
+                await self._bitrix.complete_activity(activity_id)
+                return
+        elif await self._bitrix.activity_has_marker(marker):
             return
         bindings = [{"OWNER_TYPE_ID": 3, "OWNER_ID": transaction.bitrix_contact_id}]
         if transaction.bitrix_lead_id:
             bindings.append({"OWNER_TYPE_ID": 1, "OWNER_ID": transaction.bitrix_lead_id})
-        send_failed = transaction.send_status == "send_failed"
+        send_failed = transaction.send_status == "send_failed" and transaction.status != 'paid'
         await self._bitrix.add_activity({
-            "SUBJECT": "Отправить ссылку на оплату клиенту" if send_failed else "Ссылка на оплату подготовлена",
+            "SUBJECT": "Оплата сформирована и подтверждена" if transaction.status == 'paid' else
+                ("Отправить ссылку на оплату клиенту" if send_failed else "Ссылка на оплату подготовлена"),
             "DESCRIPTION": marker,
             "COMPLETED": "N" if send_failed else "Y",
             "BINDINGS": bindings,
         })
+
+    async def _complete_formation_activity(self, transaction: PaymentTransaction) -> PaymentTransaction:
+        """Record the optional activity step without retrying payment formation when disabled."""
+        if self._settings.bx24_payment_create_activity:
+            with span("activity"):
+                await self._formation_activity(transaction)
+        else:
+            with span("activity", skipped=True):
+                pass
+        return await self._repository.update(transaction.id, formation_activity_created=True)
 
     async def _owned(self, actor: Actor, transaction_id: UUID) -> PaymentTransaction:
         transaction = await self._repository.get(transaction_id, actor.user_id)
@@ -352,6 +408,8 @@ class PaymentService:
     def to_response(transaction: PaymentTransaction) -> PaymentTransactionResponse:
         return PaymentTransactionResponse(
             id=transaction.id, status=transaction.status, current_step=transaction.current_step,
+            pending_commands=[transaction.current_step.removesuffix('_queued')]
+                if transaction.current_step in {'cancel_queued', 'resend_queued', 'select_queued', 'resume_queued'} else [],
             send_status=transaction.send_status, product_title=transaction.product_title,
             catalog_amount=transaction.catalog_amount, actual_amount=transaction.actual_amount,
             currency=transaction.currency, payment_url=transaction.payment_url,

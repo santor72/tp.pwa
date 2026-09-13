@@ -37,25 +37,9 @@ async def process_once(services, settings, now: datetime | None = None) -> int:
 
 
 async def run() -> None:
-    settings = get_settings()
-    configure_logging(settings.log_level)
-    redis = Redis.from_url(settings.cache_redis_url, decode_responses=True)
-    services = create_application_services(settings, redis)
-    stop = asyncio.Event()
-    loop = asyncio.get_running_loop()
-    for signal_name in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(signal_name, stop.set)
-    try:
-        while not stop.is_set():
-            await process_once(services, settings)
-            try:
-                await asyncio.wait_for(stop.wait(), timeout=max(1, min(settings.bx24_payment_poll_interval_seconds, 30)))
-            except TimeoutError:
-                pass
-    finally:
-        await services.close()
-        await redis.aclose()
-
+    # Compatible DB-polling fallback uses the same jobs and fencing as events.
+    from app.payment_runtime import run as run_runtime
+    await run_runtime('legacy')
 
 if __name__ == "__main__":
     asyncio.run(run())

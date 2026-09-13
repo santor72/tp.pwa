@@ -38,6 +38,18 @@ def transaction():
 
 
 @pytest.mark.asyncio
+async def test_t22_paid_is_saved_even_when_followup_activity_fails():
+    tx = transaction(); repo = Repository(tx); bitrix = Bitrix('Y')
+    async def failed_activity(fields): raise RuntimeError('CRM followup unavailable')
+    bitrix.add_activity = failed_activity
+    handler = PaymentStatusHandler(Settings(_env_file=None), repo, bitrix)
+    with pytest.raises(RuntimeError): await handler.handle(12)
+    assert tx.status == 'paid'
+    assert tx.paid_timeline_created is True
+    assert tx.paid_activity_created is False
+
+
+@pytest.mark.asyncio
 async def test_status_handler_trusts_only_confirmed_paid_flag_and_is_idempotent() -> None:
     tx = transaction(); repository = Repository(tx); bitrix = Bitrix("N"); handler = PaymentStatusHandler(Settings(), repository, bitrix)
     await handler.handle(12)

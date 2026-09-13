@@ -1,0 +1,84 @@
+# Only combine with compose.payment-events-test.yaml, using a separate project.
+# No .env interpolation, real credentials, application volumes or external egress.
+x-runtime: &runtime
+  image: tp-payment-runtime-test:local
+  build:
+    context: .
+    dockerfile: backend/Dockerfile
+  environment: &environment
+    DATABASE_URL: postgresql+asyncpg://events_test:events_test@postgres:5432/payment_events_test
+    REDIS_HOST: redis
+    PAYMENT_EVENTS_REDIS_URL: redis://redis:6379/3
+    PAYMENT_EVENTS_PREFIX: runtime-smoke
+    PAYMENT_PROCESSING_MODE: events
+    PAYMENT_TELEMETRY_ENABLED: 'false'
+    BX24_WEBHOOK: ''
+    TP_BASE_URL: http://unconfigured-test-provider.invalid
+    TP_BASE_TOKEN: ''
+    PAYMENT_STREAM_RETENTION_ENABLED: 'false'
+    PAYMENT_JOB_RETENTION_ENABLED: 'false'
+  depends_on:
+    initialize:
+      condition: service_completed_successfully
+    redis:
+      condition: service_healthy
+  stop_grace_period: 40s
+
+x-health: &health
+  interval: 3s
+  timeout: 5s
+  retries: 10
+
+services:
+  migrate:
+    <<: *runtime
+    command: [alembic, -c, alembic.ini, upgrade, head]
+    depends_on:
+      postgres:
+        condition: service_healthy
+  initialize:
+    <<: *runtime
+    command: [python, -m, app.payment_runtime, set-mode, events]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+  api:
+    <<: *runtime
+    ports: ['127.0.0.1::8000']
+    healthcheck:
+      <<: *health
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+  payment-outbox-relay:
+    <<: *runtime
+    command: [python, -m, app.payment_runtime, relay]
+    healthcheck:
+      <<: *health
+      test: [CMD, python, -m, app.payment_runtime, health, relay]
+  payment-formation-worker:
+    <<: *runtime
+    command: [python, -m, app.payment_runtime, formation]
+    healthcheck:
+      <<: *health
+      test: [CMD, python, -m, app.payment_runtime, health, formation]
+  payment-reconciliation-worker:
+    <<: *runtime
+    command: [python, -m, app.payment_runtime, reconciliation]
+    healthcheck:
+      <<: *health
+      test: [CMD, python, -m, app.payment_runtime, health, reconciliation]
+  payment-recovery-formation:
+    <<: *runtime
+    command: [python, -m, app.payment_runtime, recovery-formation]
+    healthcheck:
+      <<: *health
+      test: [CMD, python, -m, app.payment_runtime, health, recovery-formation]
+  payment-recovery-reconciliation:
+    <<: *runtime
+    command: [python, -m, app.payment_runtime, recovery-reconciliation]
+    healthcheck:
+      <<: *health
+      test: [CMD, python, -m, app.payment_runtime, health, recovery-reconciliation]
+
+networks:
+  default:
+    internal: true

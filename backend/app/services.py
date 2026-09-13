@@ -13,6 +13,8 @@ from app.payment_addresses import PaymentAddressService
 from app.payment_catalog import PaymentProductCatalog
 from app.payment_client_resolver import PaymentClientResolver
 from app.payment_status import PaymentStatusHandler
+from app.payment_event_repository import PaymentEventRepository
+from app.payment_limiter import PaymentRequestLimiter
 from app.payments import PaymentService
 from app.messenger_links import MessengerLinkService
 from app.repositories import PaymentRepository, SqlAlchemyMessengerRepository
@@ -44,7 +46,9 @@ def create_application_services(settings: Settings, cache_redis: Redis) -> Appli
     sessions = create_session_factory(engine)
     cache = CacheStore(cache_redis)
     bitrix = Bitrix24Client(settings)
-    payment_repository = PaymentRepository(sessions)
+    events = PaymentEventRepository(sessions, expected_mode=settings.payment_processing_mode)
+    payment_repository = PaymentRepository(sessions, events=events)
+    bitrix.limiter = PaymentRequestLimiter(events, settings)
     payment_catalog = PaymentProductCatalog(settings, bitrix, cache)
     resolver = PaymentClientResolver(settings, bitrix)
     return ApplicationServices(

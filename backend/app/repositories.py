@@ -8,8 +8,9 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.models import MessengerIdentity, PaymentOperationSpan, PaymentTransaction, PaymentTransactionEvent, User
+from app.models import MessengerIdentity, PaymentJob, PaymentOperationSpan, PaymentTransaction, PaymentTransactionEvent, User
 from app.payment_telemetry import measured
+from app.payment_execution import current_execution, PaymentLeaseLost
 from app.errors import PaymentStateError
 from app.schemas import UserProfile
 
@@ -17,7 +18,7 @@ from app.schemas import UserProfile
 PAYMENT_STATUS_TRANSITIONS: dict[str, set[str]] = {
     "draft": {"resolving_client", "failed", "expired", "canceled", "paid"},
     "resolving_client": {"client_selection_required", "client_resolved", "failed", "expired", "canceled", "paid"},
-    "client_selection_required": {"client_resolved", "failed", "expired", "canceled", "paid"},
+    "client_selection_required": {"resolving_client", "client_resolved", "failed", "expired", "canceled", "paid"},
     "client_resolved": {"invoice_created", "failed", "expired", "canceled", "paid"},
     "invoice_created": {"product_added", "failed", "expired", "canceled", "paid"},
     "product_added": {"payment_created", "failed", "expired", "canceled", "paid"},
@@ -92,11 +93,14 @@ class SqlAlchemyMessengerRepository:
 
 
 class PaymentRepository:
-    def __init__(self, sessions: async_sessionmaker[AsyncSession]) -> None:
+    def __init__(self, sessions: async_sessionmaker[AsyncSession], events=None) -> None:
         self._sessions = sessions
+        self.event_queue = events
 
     @measured("db.create", "db")
     async def create_or_get(self, *, idempotency_key: UUID, values: dict) -> tuple[PaymentTransaction, bool]:
+        if self.event_queue is not None:
+            return await self.event_queue.create_payment(idempotency_key, values)
         async with self._sessions() as session:
             existing = await session.scalar(select(PaymentTransaction).where(PaymentTransaction.idempotency_key == idempotency_key))
             if existing is not None:
@@ -160,6 +164,10 @@ class PaymentRepository:
     @measured("db.update", "db")
     async def update(self, transaction_id: UUID, **values) -> PaymentTransaction:
         async with self._sessions() as session:
+            execution = current_execution.get()
+            if execution is not None:
+                if transaction_id != execution.claim.transaction_id or not await execution.repository.owns_in_session(session, execution.claim):
+                    raise PaymentLeaseLost()
             transaction = await session.scalar(
                 select(PaymentTransaction).where(PaymentTransaction.id == transaction_id).with_for_update()
             )
@@ -183,6 +191,10 @@ class PaymentRepository:
         external_request_id: str | None = None,
     ) -> None:
         async with self._sessions() as session:
+            execution = current_execution.get()
+            if execution is not None:
+                if transaction_id != execution.claim.transaction_id or not await execution.repository.owns_in_session(session, execution.claim):
+                    raise PaymentLeaseLost()
             session.add(PaymentTransactionEvent(
                 transaction_id=transaction_id,
                 event_type=event_type,
@@ -199,6 +211,14 @@ class PaymentRepository:
     async def timing_detail(self, transaction_id):
         async with self._sessions() as session:
             return list(await session.scalars(select(PaymentOperationSpan).where(PaymentOperationSpan.transaction_id == transaction_id).order_by(PaymentOperationSpan.started_at, PaymentOperationSpan.id)))
+
+    async def job_diagnostics(self, transaction_ids):
+        async with self._sessions() as session:
+            rows = await session.scalars(select(PaymentJob).where(PaymentJob.transaction_id.in_(transaction_ids))
+                .order_by(PaymentJob.created_at, PaymentJob.id))
+            return [dict(id=r.id, transaction_id=r.transaction_id, kind=r.kind, state=r.state, generation=r.generation,
+                attempt_count=r.attempt_count, error=r.last_safe_error, available_at=r.available_at,
+                started_at=r.started_at, finished_at=r.finished_at) for r in rows]
 
     async def timing_list(self, *, date_from, date_to, phone, employee, status, page, page_size):
         filters = [PaymentTransaction.created_at >= date_from, PaymentTransaction.created_at < date_to]

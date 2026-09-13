@@ -6,10 +6,12 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.database import create_engine, create_session_factory
 from app.errors import PaymentStateError
-from app.models import User
+from app.models import Base, User
 from app.repositories import PaymentRepository
 
 
@@ -22,7 +24,14 @@ pytestmark = pytest.mark.skipif(
 @pytest_asyncio.fixture
 async def repository():
     database_url = os.environ["PAYMENT_TEST_DATABASE_URL"]
-    engine = create_engine(database_url)
+    assert database_url.rsplit('/', 1)[-1] in {'payment_events_test', 'payment_test'}, 'isolated test database required'
+    schema = 'legacy_payment_' + uuid4().hex
+    admin = create_engine(database_url)
+    async with admin.begin() as connection:
+        await connection.execute(text(f'CREATE SCHEMA {schema}'))
+    engine = create_async_engine(database_url, connect_args={'server_settings': {'search_path': schema}})
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
     sessions = create_session_factory(engine)
     user = User(
         techportal_user_id=f"payment-test-{uuid4()}",
@@ -39,6 +48,9 @@ async def repository():
         yield PaymentRepository(sessions), user.id
     finally:
         await engine.dispose()
+        async with admin.begin() as connection:
+            await connection.execute(text(f'DROP SCHEMA {schema} CASCADE'))
+        await admin.dispose()
 
 
 def transaction_values(user_id, *, now: datetime, payment_id: int | None = None, expired: bool = False) -> dict:

@@ -3,7 +3,7 @@ from datetime import datetime
 
 from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, JSON, Numeric, String, Text, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Index, Integer, JSON, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -94,6 +94,7 @@ class PaymentTransaction(Base):
     current_step: Mapped[str] = mapped_column(String(64), nullable=False, default="draft")
     send_status: Mapped[str | None] = mapped_column(String(64))
     candidate_snapshot: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    client_resolution: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     last_error_code: Mapped[str | None] = mapped_column(String(128))
     last_error_message: Mapped[str | None] = mapped_column(Text)
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -141,3 +142,120 @@ class PaymentOperationSpan(Base):
     outcome: Mapped[str] = mapped_column(String(32), nullable=False)
     details: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     __table_args__ = (Index("ix_payment_spans_transaction_started", "transaction_id", "started_at"),)
+
+
+class PaymentJob(Base):
+    __tablename__ = "payment_jobs"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    transaction_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("payment_transactions.id", ondelete="CASCADE"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False, default="ready")
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_safe_error: Mapped[str | None] = mapped_column(String(128))
+    details: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (
+        UniqueConstraint("transaction_id", "kind", "generation", name="uq_payment_job_generation"),
+        Index("ix_payment_jobs_due", "kind", "state", "available_at"),
+        Index("ix_payment_jobs_finished", "finished_at", "id"),
+    )
+
+
+class PaymentOutbox(Base):
+    __tablename__ = "payment_outbox"
+    event_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("payment_jobs.id", ondelete="CASCADE"), nullable=False, unique=True)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    publish_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_publish_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    publisher_token: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    publisher_lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    stream_message_id: Mapped[str | None] = mapped_column(String(64))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    __table_args__ = (Index("ix_payment_outbox_due", "completed_at", "last_published_at", "next_publish_at"),)
+
+
+class PaymentJobArchive(Base):
+    """Compact immutable identity of completed work, not a runnable job."""
+    __tablename__ = 'payment_job_archive'
+    job_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    event_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, unique=True)
+    transaction_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('payment_transactions.id', ondelete='CASCADE'), nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False)
+    finished_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class PaymentExecutionLease(Base):
+    __tablename__ = "payment_execution_leases"
+    transaction_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("payment_transactions.id", ondelete="CASCADE"), primary_key=True)
+    owner: Mapped[str] = mapped_column(String(128), nullable=False)
+    fencing_token: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    lease_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    __table_args__ = (Index("ix_payment_execution_lease_expiry", "lease_until"),)
+
+
+class PaymentExternalWrite(Base):
+    __tablename__ = "payment_external_writes"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    transaction_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("payment_transactions.id", ondelete="CASCADE"), nullable=False)
+    marker: Mapped[str] = mapped_column(String(128), nullable=False)
+    method: Mapped[str] = mapped_column(String(128), nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False)
+    fencing_token: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    remote_id: Mapped[str | None] = mapped_column(String(128))
+    recovery: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    __table_args__ = (UniqueConstraint("transaction_id", "marker", name="uq_payment_write_marker"),)
+
+
+class PaymentRequestBudget(Base):
+    __tablename__ = "payment_request_budgets"
+    integration_key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    next_slot_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    cooldown_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class PaymentEventQuarantine(Base):
+    __tablename__ = "payment_event_quarantine"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    stream: Mapped[str] = mapped_column(String(128), nullable=False)
+    message_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    reason: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    __table_args__ = (UniqueConstraint("stream", "message_id", name="uq_payment_quarantine_message"),)
+
+
+class PaymentCallbackInbox(Base):
+    __tablename__ = "payment_callback_inbox"
+    payment_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class PaymentRuntimeControl(Base):
+    __tablename__ = "payment_runtime_control"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    mode: Mapped[str] = mapped_column(String(16), nullable=False)
+
+
+class PaymentRuntimeMember(Base):
+    __tablename__ = "payment_runtime_members"
+    owner: Mapped[str] = mapped_column(String(128), primary_key=True)
+    role: Mapped[str] = mapped_column(String(32), nullable=False)
+    host: Mapped[str] = mapped_column(String(128), nullable=False)
+    mode: Mapped[str] = mapped_column(String(16), nullable=False)
+    healthy_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

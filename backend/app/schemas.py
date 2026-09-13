@@ -232,6 +232,7 @@ class PaymentTransactionResponse(BaseModel):
     id: UUID
     status: PaymentStatus
     current_step: str
+    pending_commands: list[str] = Field(default_factory=list)
     send_status: str | None = None
     product_title: str
     catalog_amount: Decimal

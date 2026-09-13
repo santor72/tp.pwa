@@ -13,6 +13,12 @@ PWA для разъездных специалистов. Текущая вер�
 Правила ролей, точечных прав и capabilities:
 [`docs/permissions.md`](docs/permissions.md).
 
+Событийная обработка платежей (в разработке):
+[план](docs/payment-events-outbox-plan.md),
+[переключение, масштабирование и откат](docs/payment-events-runbook.md),
+[отчёт нагрузочных проверок](docs/payment-events-load-report.md).
+До завершения итоговой проверки не переключайте рабочий сервер на `events`.
+
 ## Запуск
 
 1. Заполните `.env` на основе `.env.example`. Значения `TP_LOGIN` и
@@ -26,7 +32,11 @@ PWA для разъездных специалистов. Текущая вер�
    `TELEGRAM_BOT_USERNAME`, `TG_ACCESS_GROUPS` и `HTTPS_PROXY`. Long polling
    бота не запускается без `HTTPS_PROXY`; он применяется ко всем обращениям к
    Telegram API.
-2. Запустите контейнеры:
+2. Для совместимого worker должны быть заданы `COMPOSE_PROFILES=legacy` и
+   `PAYMENT_PROCESSING_MODE=legacy` (как в `.env.example`). Если `.env` создан
+   раньше этих настроек, добавьте их: сервис worker теперь выбирается профилем.
+   Не включайте одновременно профили `legacy` и `events` при запуске приложения.
+   Запустите контейнеры:
 
    ```bash
    docker compose up --build
@@ -175,6 +185,10 @@ docker run --rm techportal-frontend-test pnpm test
   webhook с секретом `BX24_PAYMENT_WEBHOOK_TOKEN`.
 - Если SMS не настроено, операция остаётся в `send_failed`, а короткая ссылка и
   QR доступны сотруднику; успешная отправка не симулируется.
+- Комментарий о сформированной оплате остаётся в таймлайне Контакта и Лида.
+  Создание отдельного CRM activity выключено по умолчанию
+  (`BX24_PAYMENT_CREATE_ACTIVITY=false`); включайте его только если портал
+  принимает этот тип CRM-дела.
 - Для события `OnPaymentEntitySaved` зарегистрируйте исходящий WEBHOOK в Bitrix24 
   endpoint  - <адрес приложения>`/api/webhooks/bitrix24/payments`.
   полученный токен авторизации нужно записать в `BX24_PAYMENT_WEBHOOK_TOKEN` ;

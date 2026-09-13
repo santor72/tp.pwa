@@ -27,6 +27,8 @@ class PaymentStatusHandler:
             transaction = await self._repository.update(transaction.id, **metadata)
         paid = payment.get("paid", payment.get("PAID")) in {True, "Y", 1, "1"}
         if not paid:
+            if transaction.status in {'canceled', 'expired', 'failed'}:
+                return transaction
             now = datetime.now(UTC)
             if transaction.expires_at <= now:
                 transaction = await self._repository.update(
@@ -38,6 +40,12 @@ class PaymentStatusHandler:
                 transaction.id,
                 next_attempt_at=now + timedelta(seconds=self._settings.bx24_payment_poll_interval_seconds),
             )
+        if transaction.status != "paid":
+            transaction = await self._repository.update(
+                transaction.id, status="paid", current_step="paid", paid_at=datetime.now(UTC),
+                last_error_code=None, last_error_message=None, next_attempt_at=None,
+            )
+            await self._repository.add_event(transaction.id, "payment.paid", {"payment_id": payment_id})
         if not transaction.paid_timeline_created:
             marker = f"Операция ТехПортала: {transaction.id}; событие: payment-paid"
             comment = f"Оплата подтверждена\nСумма: {transaction.actual_amount} {transaction.currency}\n{marker}"
@@ -57,15 +65,8 @@ class PaymentStatusHandler:
                     "DESCRIPTION": marker, "COMPLETED": "Y", "BINDINGS": bindings,
                 })
             transaction = await self._repository.update(transaction.id, paid_activity_created=True)
-        if transaction.status != "paid":
-            transaction = await self._repository.update(
-                transaction.id, status="paid", current_step="paid", paid_at=datetime.now(UTC),
-                last_error_code=None, last_error_message=None, next_attempt_at=None,
-            )
-            await self._repository.add_event(transaction.id, "payment.paid", {"payment_id": payment_id})
-        if not was_paid:
-            pending_marker = f"Операция ТехПортала: {transaction.id}; событие: payment-link-created"
-            pending_activity_id = await self._bitrix.activity_id_by_marker(pending_marker)
-            if pending_activity_id is not None:
-                await self._bitrix.complete_activity(pending_activity_id)
+        pending_marker = f"Операция ТехПортала: {transaction.id}; событие: payment-link-created"
+        pending_activity_id = await self._bitrix.activity_id_by_marker(pending_marker)
+        if pending_activity_id is not None:
+            await self._bitrix.complete_activity(pending_activity_id)
         return transaction

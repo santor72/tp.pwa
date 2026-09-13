@@ -1,3 +1,29 @@
+x-payment-events-environment: &payment-events-environment
+  PAYMENT_PROCESSING_MODE: ${PAYMENT_PROCESSING_MODE:-legacy}
+  PAYMENT_EVENTS_REDIS_URL: ${PAYMENT_EVENTS_REDIS_URL:-redis://redis:6379/3}
+  PAYMENT_EVENTS_PREFIX: ${PAYMENT_EVENTS_PREFIX:-tp-pwa}
+  PAYMENT_OUTBOX_POLL_SECONDS: ${PAYMENT_OUTBOX_POLL_SECONDS:-1}
+  PAYMENT_RECOVERY_INTERVAL_SECONDS: ${PAYMENT_RECOVERY_INTERVAL_SECONDS:-30}
+  PAYMENT_LEASE_SECONDS: ${PAYMENT_LEASE_SECONDS:-90}
+  PAYMENT_HEARTBEAT_SECONDS: ${PAYMENT_HEARTBEAT_SECONDS:-15}
+  PAYMENT_RECLAIM_IDLE_MS: ${PAYMENT_RECLAIM_IDLE_MS:-90000}
+  PAYMENT_SHUTDOWN_GRACE_SECONDS: ${PAYMENT_SHUTDOWN_GRACE_SECONDS:-30}
+  PAYMENT_FORMATION_CONCURRENCY: ${PAYMENT_FORMATION_CONCURRENCY:-1}
+  PAYMENT_RECONCILIATION_CONCURRENCY: ${PAYMENT_RECONCILIATION_CONCURRENCY:-1}
+  PAYMENT_BITRIX_REQUESTS_PER_SECOND: ${PAYMENT_BITRIX_REQUESTS_PER_SECOND:-1}
+  PAYMENT_BITRIX_COOLDOWN_SECONDS: ${PAYMENT_BITRIX_COOLDOWN_SECONDS:-30}
+  PAYMENT_HEALTH_INTERVAL_SECONDS: ${PAYMENT_HEALTH_INTERVAL_SECONDS:-30}
+  PAYMENT_HEALTH_DUE_AGE_SECONDS: ${PAYMENT_HEALTH_DUE_AGE_SECONDS:-120}
+  PAYMENT_HEALTH_OUTBOX_AGE_SECONDS: ${PAYMENT_HEALTH_OUTBOX_AGE_SECONDS:-10}
+  PAYMENT_STREAM_RETENTION_ENABLED: ${PAYMENT_STREAM_RETENTION_ENABLED:-false}
+  PAYMENT_STREAM_RETENTION_DAYS: ${PAYMENT_STREAM_RETENTION_DAYS:-30}
+  PAYMENT_STREAM_RETENTION_BATCH_SIZE: ${PAYMENT_STREAM_RETENTION_BATCH_SIZE:-50}
+  PAYMENT_STREAM_RETENTION_INTERVAL_SECONDS: ${PAYMENT_STREAM_RETENTION_INTERVAL_SECONDS:-600}
+  PAYMENT_JOB_RETENTION_ENABLED: ${PAYMENT_JOB_RETENTION_ENABLED:-false}
+  PAYMENT_JOB_RETENTION_DAYS: ${PAYMENT_JOB_RETENTION_DAYS:-30}
+  PAYMENT_JOB_RETENTION_BATCH_SIZE: ${PAYMENT_JOB_RETENTION_BATCH_SIZE:-50}
+  PAYMENT_JOB_RETENTION_INTERVAL_SECONDS: ${PAYMENT_JOB_RETENTION_INTERVAL_SECONDS:-600}
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -41,6 +67,7 @@ services:
         fluentd-async: "true"
         tag: "tppwa.api"
     environment:
+      <<: *payment-events-environment
       REDIS_HOST: redis
       REDIS_PORT: 6379
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://techportal:change-me@postgres:5432/techportal}
@@ -69,6 +96,7 @@ services:
       BX24_PAYMENT_ALLOW_PRICE_OVERRIDE: ${BX24_PAYMENT_ALLOW_PRICE_OVERRIDE:-true}
       BX24_PAYMENT_LINK_FIELD: ${BX24_PAYMENT_LINK_FIELD:-}
       BX24_PAYMENT_SEND_TRIGGER: ${BX24_PAYMENT_SEND_TRIGGER:-}
+      BX24_PAYMENT_CREATE_ACTIVITY: ${BX24_PAYMENT_CREATE_ACTIVITY:-false}
       BX24_PAYMENT_WEBHOOK_TOKEN: ${BX24_PAYMENT_WEBHOOK_TOKEN:-}
       BX24_PAYMENT_POLL_INTERVAL_SECONDS: ${BX24_PAYMENT_POLL_INTERVAL_SECONDS:-30}
       BX24_PAYMENT_EXPIRES_SECONDS: ${BX24_PAYMENT_EXPIRES_SECONDS:-86400}
@@ -124,12 +152,14 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
-  payment-worker:
+  payment-worker: &payment-worker-service
+    profiles: [legacy]
     build:
       context: .
       dockerfile: backend/Dockerfile
     command: ["python", "-m", "app.payment_worker"]
     environment:
+      <<: *payment-events-environment
       REDIS_HOST: redis
       REDIS_PORT: 6379
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://techportal:change-me@postgres:5432/techportal}
@@ -143,6 +173,7 @@ services:
       BX24_PAYMENT_ALLOW_PRICE_OVERRIDE: ${BX24_PAYMENT_ALLOW_PRICE_OVERRIDE:-true}
       BX24_PAYMENT_LINK_FIELD: ${BX24_PAYMENT_LINK_FIELD:-}
       BX24_PAYMENT_SEND_TRIGGER: ${BX24_PAYMENT_SEND_TRIGGER:-}
+      BX24_PAYMENT_CREATE_ACTIVITY: ${BX24_PAYMENT_CREATE_ACTIVITY:-false}
       BX24_PAYMENT_WEBHOOK_TOKEN: ${BX24_PAYMENT_WEBHOOK_TOKEN:-}
       BX24_PAYMENT_POLL_INTERVAL_SECONDS: ${BX24_PAYMENT_POLL_INTERVAL_SECONDS:-30}
       BX24_PAYMENT_EXPIRES_SECONDS: ${BX24_PAYMENT_EXPIRES_SECONDS:-86400}
@@ -152,11 +183,64 @@ services:
       PAYMENT_TELEMETRY_ENABLED: ${PAYMENT_TELEMETRY_ENABLED:-false}
       BX24_WORKER_MAX_RETRIES: ${BX24_WORKER_MAX_RETRIES:-8}
     depends_on:
-      redis:
-        condition: service_healthy
       migrate:
         condition: service_completed_successfully
     restart: unless-stopped
+
+  payment-outbox-relay:
+    <<: *payment-worker-service
+    profiles: [events]
+    command: ["python", "-m", "app.payment_runtime", "relay"]
+    stop_grace_period: 40s
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.payment_runtime", "health", "relay"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  payment-formation-worker:
+    <<: *payment-worker-service
+    profiles: [events]
+    command: ["python", "-m", "app.payment_runtime", "formation"]
+    stop_grace_period: 40s
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.payment_runtime", "health", "formation"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  payment-reconciliation-worker:
+    <<: *payment-worker-service
+    profiles: [events]
+    command: ["python", "-m", "app.payment_runtime", "reconciliation"]
+    stop_grace_period: 40s
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.payment_runtime", "health", "reconciliation"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  payment-recovery-formation:
+    <<: *payment-worker-service
+    profiles: [events]
+    command: ["python", "-m", "app.payment_runtime", "recovery-formation"]
+    stop_grace_period: 40s
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.payment_runtime", "health", "recovery-formation"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  payment-recovery-reconciliation:
+    <<: *payment-worker-service
+    profiles: [events]
+    command: ["python", "-m", "app.payment_runtime", "recovery-reconciliation"]
+    stop_grace_period: 40s
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.payment_runtime", "health", "recovery-reconciliation"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
 
   frontend:
     build:

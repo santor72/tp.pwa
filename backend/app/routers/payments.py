@@ -187,6 +187,10 @@ async def bitrix_payment_webhook(request: Request, settings: Settings = Depends(
         raw = parsed.get("data[FIELDS][ID]", parsed.get("data[ID]", [None]))[0]
         payment_id = int(raw) if raw and str(raw).isdigit() else None
     if payment_id is not None:
-        await request.app.state.payment_status.handle(payment_id)
+        repository = getattr(request.app.state, 'payment_repository', None)
+        if getattr(repository, 'event_queue', None) is not None:
+            await repository.event_queue.receive_callback(payment_id)
+        else:
+            await request.app.state.payment_status.handle(payment_id)
         audit(logger, "payment.webhook.accepted", payment_id=payment_id)
     return {"accepted": True}

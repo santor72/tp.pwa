@@ -33,4 +33,10 @@ def run_migrations_online() -> None:
     asyncio.run(run_async_migrations())
 
 
-run_migrations_online()
+# Tests and programmatic deployments may supply an already scoped connection.
+# Normal CLI execution still constructs its connection from DATABASE_URL.
+provided_connection = config.attributes.get('connection')
+if provided_connection is None:
+    run_migrations_online()
+else:
+    do_run_migrations(provided_connection)

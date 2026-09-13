@@ -68,9 +68,39 @@ def make_transaction():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('existing_activity', [None, 77])
+async def test_paid_formation_finishes_audit_without_recreating_or_sending(existing_activity):
+    transaction = make_transaction()
+    transaction.status = 'paid'; transaction.current_step = 'paid'
+    transaction.bitrix_contact_id = 5; transaction.bitrix_lead_id = 6
+    transaction.bitrix_invoice_id = 10; transaction.bitrix_payment_id = 12
+    transaction.send_status = 'send_failed'
+    repository = FakeRepository(transaction); bitrix = FakeBitrix()
+    async def activity_id(marker): return existing_activity
+    async def complete(activity_id): bitrix.calls.append(('complete', activity_id))
+    bitrix.activity_id_by_marker = activity_id
+    bitrix.complete_activity = complete
+    service = PaymentService(Settings(_env_file=None, bx24_payment_create_activity=True), repository, SimpleNamespace(), FakeResolver(), bitrix)
+    result = await service.process(transaction.id)
+    assert result.status == 'paid' and result.current_step == 'paid'
+    assert result.formation_timeline_created and result.formation_activity_created
+    assert not any(call[0] in {'invoice', 'row', 'payment', 'payment_product', 'url', 'send'} for call in bitrix.calls)
+    if existing_activity:
+        assert ('complete', existing_activity) in bitrix.calls
+        assert not any(call[0] == 'activity' for call in bitrix.calls)
+    else:
+        activity = next(call[1] for call in bitrix.calls if call[0] == 'activity')
+        assert activity['COMPLETED'] == 'Y'
+        assert 'Отправить' not in activity['SUBJECT']
+    before = list(bitrix.calls)
+    await service.process(transaction.id)
+    assert bitrix.calls == before
+
+
+@pytest.mark.asyncio
 async def test_orchestrator_creates_each_bitrix_entity_once_and_keeps_link_when_sms_unconfigured() -> None:
     transaction = make_transaction(); repository = FakeRepository(transaction); bitrix = FakeBitrix()
-    service = PaymentService(Settings(), repository, SimpleNamespace(), FakeResolver(), bitrix)
+    service = PaymentService(Settings(_env_file=None), repository, SimpleNamespace(), FakeResolver(), bitrix)
     result = await service.process(transaction.id)
     assert result.status == "send_failed"
     assert result.payment_short_url == "https://pay/s"
@@ -84,9 +114,19 @@ async def test_orchestrator_creates_each_bitrix_entity_once_and_keeps_link_when_
 
 
 @pytest.mark.asyncio
+async def test_activity_is_skipped_by_default_but_timeline_comment_remains() -> None:
+    transaction = make_transaction(); repository = FakeRepository(transaction); bitrix = FakeBitrix()
+    result = await PaymentService(Settings(_env_file=None), repository, SimpleNamespace(), FakeResolver(), bitrix).process(transaction.id)
+
+    assert result.formation_timeline_created and result.formation_activity_created
+    assert any(call[0] == "comment" for call in bitrix.calls)
+    assert not any(call[0] == "activity" for call in bitrix.calls)
+
+
+@pytest.mark.asyncio
 async def test_custom_price_is_sent_as_product_row_price() -> None:
     transaction = make_transaction(); repository = FakeRepository(transaction); bitrix = FakeBitrix()
-    await PaymentService(Settings(), repository, SimpleNamespace(), FakeResolver(), bitrix).process(transaction.id)
+    await PaymentService(Settings(_env_file=None), repository, SimpleNamespace(), FakeResolver(), bitrix).process(transaction.id)
     row = next(call for call in bitrix.calls if call[0] == "row")
     assert row[2]["productId"] == 123
     assert row[2]["price"] == "1700.00"
@@ -102,7 +142,7 @@ async def test_send_trigger_recovers_remote_write_and_explicit_resend_forces_wri
     transaction.payment_url = "https://pay/full"; transaction.payment_short_url = "https://pay/s"
     transaction.status = "link_created"; transaction.current_step = "link_created"
     transaction.formation_timeline_created = True
-    settings = Settings(bx24_payment_link_field="ufCrmPaymentLink", bx24_payment_send_trigger="stageId=DT31_1:SENT")
+    settings = Settings(_env_file=None, bx24_payment_link_field="ufCrmPaymentLink", bx24_payment_send_trigger="stageId=DT31_1:SENT")
     repository = FakeRepository(transaction); bitrix = FakeBitrix()
     bitrix.invoice_fields = {"ufCrmPaymentLink": "https://pay/s", "stageId": "DT31_1:SENT"}
     service = PaymentService(settings, repository, SimpleNamespace(), FakeResolver(), bitrix)
@@ -119,7 +159,7 @@ async def test_send_trigger_recovers_remote_write_and_explicit_resend_forces_wri
 @pytest.mark.asyncio
 async def test_payment_card_is_not_available_to_another_employee() -> None:
     transaction = make_transaction(); repository = FakeRepository(transaction); bitrix = FakeBitrix()
-    service = PaymentService(Settings(), repository, SimpleNamespace(), FakeResolver(), bitrix)
+    service = PaymentService(Settings(_env_file=None), repository, SimpleNamespace(), FakeResolver(), bitrix)
     with pytest.raises(PaymentNotFoundError):
         await service.get(SimpleNamespace(user_id=uuid4()), transaction.id)
 
@@ -163,10 +203,10 @@ async def test_orchestrator_recovers_unknown_result_after_each_external_write(fa
         async def update_invoice(self, invoice_id, fields):
             self.calls.append(("send", invoice_id, fields)); self.invoice_fields.update(fields); self.fail_after_write("send")
 
-    settings = Settings(**({
+    settings = Settings(_env_file=None, **({
         "bx24_payment_link_field": "ufCrmPaymentLink",
         "bx24_payment_send_trigger": "stageId=DT31_1:SENT",
-    } if failure_stage == "send" else {}))
+    } if failure_stage == "send" else {}), bx24_payment_create_activity=failure_stage == "activity")
     transaction = make_transaction(); repository = FakeRepository(transaction); bitrix = RecoveringBitrix()
     service = PaymentService(settings, repository, SimpleNamespace(), FakeResolver(), bitrix)
     with pytest.raises(Bitrix24Error):

@@ -1,0 +1,9 @@
+# Fourth overlay: ONLY the disposable tp-payment-runtime-test project.
+# Shorten grace/lease for deterministic cancellation before HTTP timeout.
+services:
+  payment-formation-worker:
+    environment:
+      PAYMENT_SHUTDOWN_GRACE_SECONDS: '2'
+      PAYMENT_LEASE_SECONDS: '6'
+      PAYMENT_HEARTBEAT_SECONDS: '1'
+      PAYMENT_RECLAIM_IDLE_MS: '1000'

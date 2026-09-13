@@ -18,6 +18,7 @@ export type PaymentStatus = 'draft' | 'resolving_client' | 'client_selection_req
 export type PaymentAccepted = { id: string; status: PaymentStatus }
 export type PaymentTransaction = PaymentAccepted & {
   current_step: string
+  pending_commands?: string[]
   send_status: string | null
   product_title: string
   catalog_amount: string

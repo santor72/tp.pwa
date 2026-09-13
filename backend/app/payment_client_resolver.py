@@ -6,6 +6,7 @@ from app.bitrix24_client import Bitrix24Client
 from app.config import Settings
 from app.models import PaymentTransaction
 from app.schemas import PaymentCandidate
+from app.payment_execution import current_execution
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,12 +27,21 @@ class PaymentClientResolver:
         self._bitrix = bitrix
 
     async def resolve(self, transaction: PaymentTransaction) -> ResolvedClient:
+        saved = getattr(transaction, 'client_resolution', {}) or {}
+        if saved.get('type') == 'new':
+            return await self._create_client(transaction)
+        if saved.get('type') == 'lead':
+            return await self.resolve_lead(transaction, saved['lead_id'], add_phone=saved.get('add_phone', False))
+        if saved.get('type') == 'contact':
+            await self._ensure_email('contact', saved['contact_id'], transaction.email)
+            return ResolvedClient(contact_id=saved['contact_id'])
         phone_variants = self._phone_variants(transaction.phone_normalized)
         contact_ids = await self._bitrix.duplicate_ids("CONTACT", phone_variants)
         if len(contact_ids) > 1:
             raise AmbiguousClient([self._candidate("contact", item) for item in contact_ids])
         if contact_ids:
             contact_id = contact_ids[0]
+            await self._remember({'type': 'contact', 'contact_id': contact_id})
             await self._ensure_email("contact", contact_id, transaction.email)
             return ResolvedClient(contact_id=contact_id)
 
@@ -58,12 +68,14 @@ class PaymentClientResolver:
         if (entity_type, entity_id) not in allowed:
             raise ValueError("candidate is not in snapshot")
         if entity_type == "contact":
+            await self._remember({'type': 'contact', 'contact_id': entity_id})
             await self._ensure_email("contact", entity_id, transaction.email)
             return ResolvedClient(contact_id=entity_id)
         add_phone = any(item.get("entity_type") == "lead" and int(item.get("entity_id", 0)) == entity_id and item.get("matched_by") == "address" for item in transaction.candidate_snapshot)
         return await self.resolve_lead(transaction, entity_id, add_phone=add_phone)
 
     async def resolve_lead(self, transaction: PaymentTransaction, lead_id: int, *, add_phone: bool = False) -> ResolvedClient:
+        await self._remember({'type': 'lead', 'lead_id': lead_id, 'add_phone': add_phone})
         await self._ensure_email("lead", lead_id, transaction.email)
         contacts = await self._bitrix.lead_contacts(lead_id)
         if contacts:
@@ -83,6 +95,7 @@ class PaymentClientResolver:
         return ResolvedClient(contact_id=contact_id, lead_id=lead_id)
 
     async def _create_client(self, transaction: PaymentTransaction) -> ResolvedClient:
+        await self._remember({'type': 'new'})
         origin_id = str(transaction.id)
         existing = await self._bitrix.find_by_origin("lead", origin_id)
         if existing:
@@ -111,6 +124,11 @@ class PaymentClientResolver:
         contact_id = await self._find_or_create_contact(transaction, origin_id)
         await self._bitrix.ensure_contact_on_lead(lead_id, contact_id)
         return ResolvedClient(contact_id=contact_id, lead_id=lead_id)
+
+    async def _remember(self, resolution):
+        execution = current_execution.get()
+        if execution is not None:
+            await execution.repository.set_resolution(execution.claim, resolution)
 
     async def _find_or_create_contact(self, transaction: PaymentTransaction, origin_id: str, *, lead_id: int | None = None) -> int:
         existing = await self._bitrix.find_by_origin("contact", origin_id)

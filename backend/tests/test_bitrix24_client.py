@@ -9,6 +9,23 @@ from app.errors import Bitrix24Error
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("body", [{}, {"result": None}, {"error": "", "error_description": "private"}])
+async def test_t17_activity_http_400_without_error_is_not_success(body):
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(400, json=body))) as http:
+        client = Bitrix24Client(Settings(_env_file=None, bx24_webhook="https://bx.test/rest/1/secret"), http)
+        with pytest.raises(Bitrix24Error) as caught:
+            await client.add_activity({"SUBJECT": "test"})
+        assert "private" not in str(caught.value)
+
+
+@pytest.mark.asyncio
+async def test_activity_successful_null_result_remains_supported():
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(200, json={"result": None}))) as http:
+        client = Bitrix24Client(Settings(_env_file=None, bx24_webhook="https://bx.test/rest/1/secret"), http)
+        assert await client.add_activity({"SUBJECT": "test"}) is None
+
+
+@pytest.mark.asyncio
 async def test_bitrix_client_calls_relative_method_and_unwraps_result() -> None:
     seen: list[httpx.Request] = []
     async def handler(request: httpx.Request) -> httpx.Response:
