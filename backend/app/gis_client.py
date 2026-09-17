@@ -1,4 +1,5 @@
 import logging
+import json
 from typing import Any
 
 import httpx
@@ -30,6 +31,30 @@ class GisClient:
     async def search(self, map_id: str, query: str) -> dict[str, Any]: return await self._request('GET', f'maps/{map_id}/search', params={'q': query})
     async def feature(self, feature_id: str) -> dict[str, Any]: return await self._request('GET', f'features/{feature_id}')
 
+    async def report_by_external_id(self, external_report_id: str) -> dict[str, Any] | None:
+        try:
+            return await self._request('GET', f'reports/by-external-id/{external_report_id}')
+        except ApiError as exc:
+            if exc.status_code == 404:
+                return None
+            raise
+
+    async def create_report(self, metadata: dict[str, Any], photos: list[tuple[str, bytes, str]]) -> dict[str, Any]:
+        token = self._settings.gis_api_token.get_secret_value()
+        if not self._settings.gis_base_url or not token:
+            raise ApiError(503, 'GIS_NOT_CONFIGURED', 'Интеграция с картой не настроена')
+        try:
+            response = await self._client.post(
+                f'{self._settings.gis_base_url}/integration/v1/reports',
+                headers={'Authorization': f'Bearer {token}', 'Accept': 'application/json'},
+                data={'metadata': json.dumps(metadata, ensure_ascii=False, separators=(',', ':'))},
+                files=[('photos', (name, content, media_type)) for name, content, media_type in photos],
+            )
+        except httpx.HTTPError as exc:
+            logger.warning('GIS unavailable', extra={'event': 'gis.unavailable', 'fields': {'operation': 'reports', 'error': type(exc).__name__}})
+            raise ServiceUnavailableError('Карта временно недоступна') from exc
+        return self._response(response, 'reports')
+
     async def _request(self, method: str, path: str, *, params: dict[str, str] | None = None) -> dict[str, Any]:
         token = self._settings.gis_api_token.get_secret_value()
         if not self._settings.gis_base_url or not token:
@@ -39,10 +64,13 @@ class GisClient:
         except httpx.HTTPError as exc:
             logger.warning('GIS unavailable', extra={'event': 'gis.unavailable', 'fields': {'operation': path, 'error': type(exc).__name__}})
             raise ServiceUnavailableError('Карта временно недоступна') from exc
+        return self._response(response, path)
+
+    def _response(self, response: httpx.Response, operation: str) -> dict[str, Any]:
         if response.status_code == 401:
-            logger.error('GIS token rejected', extra={'event': 'gis.auth.failed', 'fields': {'operation': path}})
+            logger.error('GIS token rejected', extra={'event': 'gis.auth.failed', 'fields': {'operation': operation}})
             raise ApiError(502, 'GIS_AUTH_FAILED', 'Ошибка системной авторизации карты')
-        if response.status_code in {404, 422}:
+        if response.status_code in {400, 404, 409, 422}:
             payload = self._json(response)
             raise ApiError(response.status_code, payload.get('code', 'GIS_NOT_FOUND'), payload.get('error', 'Объект карты не найден'))
         if response.status_code == 429 or response.is_server_error: raise ServiceUnavailableError('Карта временно недоступна')

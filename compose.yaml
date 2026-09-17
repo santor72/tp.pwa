@@ -80,6 +80,13 @@ services:
       GIS_BASE_URL: ${GIS_BASE_URL:-}
       GIS_API_TOKEN: ${GIS_API_TOKEN:-}
       GIS_TIMEOUT_SECONDS: ${GIS_TIMEOUT_SECONDS:-20}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://seaweedfs:8333}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      S3_BUCKET: ${S3_BUCKET:-techportal-reports}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_PUBLIC_BASE_URL: ${S3_PUBLIC_BASE_URL:-}
+      S3_TIMEOUT_SECONDS: ${S3_TIMEOUT_SECONDS:-20}
       SESSION_COOKIE_SECURE: "false"
       ALLOWED_ORIGINS: http://localhost:8081,http://127.0.0.1:8081,http://localhost:8082,http://127.0.0.1:8082
       ESB_BASE_URL: ${ESB_BASE_URL:-}
@@ -116,6 +123,42 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  seaweedfs:
+    image: chrislusf/seaweedfs:3.80
+    command: ["server", "-s3", "-s3.port=8333", "-dir=/data"]
+    volumes:
+      - seaweedfs-data:/data
+
+  completion-worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: ["python", "-m", "app.completion_worker"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://techportal:change-me@postgres:5432/techportal}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      GIS_BASE_URL: ${GIS_BASE_URL:-}
+      GIS_API_TOKEN: ${GIS_API_TOKEN:-}
+      GIS_TIMEOUT_SECONDS: ${GIS_TIMEOUT_SECONDS:-20}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://seaweedfs:8333}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      S3_BUCKET: ${S3_BUCKET:-techportal-reports}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_PUBLIC_BASE_URL: ${S3_PUBLIC_BASE_URL:-}
+      S3_TIMEOUT_SECONDS: ${S3_TIMEOUT_SECONDS:-20}
+      GIS_COMPLETION_WORKER_POLL_SECONDS: ${GIS_COMPLETION_WORKER_POLL_SECONDS:-5}
+      GIS_COMPLETION_WORKER_BATCH_SIZE: ${GIS_COMPLETION_WORKER_BATCH_SIZE:-10}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      seaweedfs:
+        condition: service_started
+    restart: unless-stopped
 
   migrate:
     build:
@@ -292,3 +335,4 @@ services:
 volumes:
   redis-data:
   postgres-data:
+  seaweedfs-data:

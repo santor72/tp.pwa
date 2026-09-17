@@ -1,8 +1,11 @@
-from uuid import UUID
+from datetime import UTC, datetime
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 
-from app.dependencies import require_session
+from app.dependencies import require_csrf, require_session
+from app.errors import ApiError
+from app.report_photos import MAX_PHOTO_BYTES, validate_report_photo
 from app.schemas import SessionData
 
 router = APIRouter(prefix='/api/gis', tags=['gis'])
@@ -36,3 +39,38 @@ async def search(map_id: UUID, request: Request, q: str = Query(min_length=1, ma
 @router.get('/features/{feature_id}')
 async def feature(feature_id: UUID, request: Request, _: tuple[str, SessionData] = Depends(require_session)):
     return await request.app.state.gis_client.feature(str(feature_id))
+
+
+@router.post('/reports')
+async def create_report(
+    request: Request,
+    feature_id: UUID = Form(),
+    external_report_id: UUID = Form(),
+    completion_id: UUID = Form(),
+    text: str = Form(default='', max_length=10_000),
+    photos: list[UploadFile] = File(default=[]),
+    session_pair: tuple[str, SessionData] = Depends(require_csrf),
+):
+    """Create a manual map report. Ticket 1 is the agreed sentinel until map reports get their own GIS type."""
+    report_text = text.strip()
+    if len(photos) > 5:
+        raise ApiError(422, 'GIS_REPORT_PHOTOS_LIMIT', 'В одном отчёте можно загрузить до 5 фотографий')
+    if not report_text and not photos:
+        raise ApiError(422, 'GIS_REPORT_EMPTY', 'Добавьте текст или фотографию')
+    payload_photos: list[tuple[str, bytes, str]] = []
+    for photo in photos:
+        content = await photo.read(MAX_PHOTO_BYTES + 1)
+        validate_report_photo(photo.content_type or '', content, code_prefix='GIS_REPORT')
+        payload_photos.append((photo.filename or f'{uuid4()}.jpg', content, photo.content_type))
+    session = session_pair[1]
+    technician_name = (session.user.first_name or session.user.email).strip() or str(session.user.id)
+    metadata = {
+        'external_report_id': str(external_report_id),
+        'ticket_id': 1,
+        'completion_id': str(completion_id),
+        'feature_id': str(feature_id),
+        'technician': {'id': str(session.user.id), 'name': technician_name},
+        'occurred_at': datetime.now(UTC).isoformat().replace('+00:00', 'Z'),
+        'text': report_text,
+    }
+    return await request.app.state.gis_client.create_report(metadata, payload_photos)

@@ -348,6 +348,40 @@ describe('Карта сети', () => {
     expect(screen.queryByText(/<br>/)).toBeNull()
     expect(fetchMock.mock.calls.some(([path]) => String(path).startsWith('https://'))).toBe(false)
   })
+
+  it('отправляет текстовый отчёт выбранного объекта через защищённый маршрут PWA', async () => {
+    const mapId = '11111111-1111-4111-8111-111111111111'
+    const layerId = '22222222-2222-4222-8222-222222222222'
+    const featureId = '33333333-3333-4333-8333-333333333333'
+    let reportRequest: RequestInit | undefined
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input)
+      if (path === '/api/auth/session') return json(session)
+      if (path === '/api/tickets/today') return json([])
+      if (path === '/api/gis/maps') return json({ rows: [{ id: mapId, name: 'Чехов', created_at: '2026-09-16T09:00:00Z', report: { total: 1 } }] })
+      if (path === `/api/gis/maps/${mapId}/layers`) return json({ rows: [{ id: layerId, name: 'Муфты', position: 1, count: 1, version: 1 }] })
+      if (path === `/api/gis/maps/${mapId}/bounds`) return json({ xmin: 37.1, ymin: 55, xmax: 37.3, ymax: 55.2 })
+      if (path.startsWith(`/api/gis/maps/${mapId}/features?bbox=`)) return json({ type: 'FeatureCollection', truncated: false, limit: 40000, features: [{ type: 'Feature', id: featureId, geometry: { type: 'Point', coordinates: [37.2, 55.1] }, properties: { id: featureId, layer_id: layerId, kind: 'Point', title: 'Муфта 1', iconColor: '#0288d1' } }] })
+      if (path === `/api/gis/features/${featureId}`) return json({ id: featureId, layer_id: layerId, map_id: mapId, layer_name: 'Муфты', title: 'Муфта 1', number: 42, kind: 'Point', description: '', geometry: { type: 'Point', coordinates: [37.2, 55.1] }, style: {}, version: 3 })
+      if (path === '/api/gis/reports') { reportRequest = init; return json({ id: 'report-id', external_report_id: 'external-id', repeated: false, retention_until: null }, 201) }
+      throw new Error(`Неожиданный запрос: ${path}`)
+    }))
+    render(<App />)
+    await screen.findByRole('heading', { name: 'Заявки сегодня' })
+    fireEvent.click(screen.getByRole('button', { name: 'Карта' }))
+    const map = await screen.findByRole('application', { name: 'Карта сети' })
+    await waitFor(() => expect(map.querySelector('.gis-point')).not.toBeNull())
+    fireEvent.click(map.querySelector('.gis-point')!)
+    const text = await screen.findByLabelText('Описание работ')
+    fireEvent.change(text, { target: { value: 'Заменили муфту' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить отчёт' }))
+    expect(await screen.findByText('Отчёт отправлен')).toBeTruthy()
+    const body = reportRequest?.body as FormData
+    expect(body.get('feature_id')).toBe(featureId)
+    expect(body.get('text')).toBe('Заменили муфту')
+    expect(body.get('external_report_id')).toMatch(/^[0-9a-f-]{36}$/)
+    expect(new Headers(reportRequest?.headers).get('X-CSRF-Token')).toBe('csrf-test')
+  })
 })
 
 describe('Capabilities', () => {
@@ -505,21 +539,11 @@ describe('Заявки', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/tickets/tomorrow', expect.any(Object))
   })
 
-  it('долгим нажатием меняет статус и передаёт CSRF', async () => {
-    let completionRequest: RequestInit | undefined
-    const completedTicket = {
-      ...ticket,
-      completed: true,
-      tags: { ...ticket.tags, 'Работы произведены': {} },
-    }
+  it('долгим нажатием открывает форму обязательного отчёта подключения', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input)
       if (path === '/api/auth/session') return json(session)
       if (path === '/api/tickets/today') return json([ticket])
-      if (path === '/api/tickets/32412/completion') {
-        completionRequest = init
-        return json(completedTicket)
-      }
       throw new Error(`Неожиданный запрос: ${path}`)
     })
     vi.stubGlobal('fetch', fetchMock)
@@ -531,9 +555,33 @@ describe('Заявки', () => {
     await vi.advanceTimersByTimeAsync(600)
     vi.useRealTimers()
 
-    expect(await screen.findByText('Неисполненных заявок нет')).toBeTruthy()
-    expect(JSON.parse(String(completionRequest?.body))).toEqual({ day: 'today', completed: true })
+    expect(await screen.findByRole('heading', { name: 'Заявка №32412' })).toBeTruthy()
+    expect(screen.getByLabelText('Отчёт о выполненных работах')).toBeTruthy()
+    expect(fetchMock.mock.calls.some(([path]) => String(path).endsWith('/completion'))).toBe(false)
+  })
+
+  it('отправляет обязательный отчёт подключения защищённым multipart-запросом', async () => {
+    let completionRequest: RequestInit | undefined
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input)
+      if (path === '/api/auth/session') return json(session)
+      if (path === '/api/tickets/today') return json([ticket])
+      if (path === '/api/tickets/32412/connection-completion') {
+        completionRequest = init
+        return json({ id: '11111111-1111-4111-8111-111111111111', ticket_id: 32412, completion_status: 'completed', gis_status: 'not_requested', gis_report_id: null, error_code: null, error_message: null, created_at: '2026-09-17T10:00:00Z', updated_at: '2026-09-17T10:00:00Z' })
+      }
+      throw new Error(`Неожиданный запрос: ${path}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: /СНТ Волга/ }))
+    fireEvent.change(screen.getByLabelText('Отчёт о выполненных работах'), { target: { value: 'Подключили услугу' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Отметить выполненной' }))
+    expect(await screen.findByText('Заявка отмечена выполненной. Отчёт добавлен в ТехПортал.')).toBeTruthy()
+    const form = completionRequest?.body as FormData
+    expect(form.get('day')).toBe('today')
+    expect(form.get('text')).toBe('Подключили услугу')
+    expect(form.get('idempotency_key')).toMatch(/^[0-9a-f-]{36}$/)
     expect(new Headers(completionRequest?.headers).get('X-CSRF-Token')).toBe('csrf-test')
-    expect(screen.queryByRole('heading', { name: 'Заявка №32412' })).toBeNull()
   })
 })

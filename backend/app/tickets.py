@@ -8,7 +8,7 @@ import phonenumbers
 from app.actors import Actor
 from app.cache_store import CacheStore
 from app.config import Settings
-from app.errors import RepairCommentRequiredError, TicketNotFoundError
+from app.errors import ApiError, RepairCommentRequiredError, TicketNotFoundError
 from app.schemas import (
     TechPortalTicket,
     TechPortalUser,
@@ -93,6 +93,8 @@ class TicketService:
         if ticket is None:
             raise TicketNotFoundError()
         is_repair = CONNECTION_TAG not in ticket.tags
+        if completed and not is_repair:
+            raise ApiError(422, 'CONNECTION_REPORT_REQUIRED', 'Для выполнения подключения заполните отчёт')
         if completed and is_repair:
             if not comment:
                 raise RepairCommentRequiredError()
@@ -134,6 +136,47 @@ class TicketService:
         comment: str | None = None,
     ) -> TicketResponse:
         return await self.set_completed(actor.techportal_user_id, day, ticket_id, completed, comment)
+
+    async def assert_connection_assigned(self, user_id: int | str, day: str, ticket_id: int) -> None:
+        if day not in {'today', 'tomorrow'}:
+            raise TicketNotFoundError()
+        offset = 0 if day == 'today' else 1
+        target = datetime.now(MOSCOW).date() + timedelta(days=offset)
+        tickets = await self._client.tickets(user_id, target.strftime('%d.%m.%Y'))
+        ticket = next((item for item in tickets if item.id == ticket_id and self._is_master(item, user_id)), None)
+        if ticket is None or CONNECTION_TAG not in ticket.tags:
+            raise TicketNotFoundError()
+
+    async def mark_connection_completed(self, user_id: int | str, day: str, ticket_id: int, comment: str) -> TicketResponse:
+        if not comment.strip():
+            raise ApiError(422, 'CONNECTION_REPORT_REQUIRED', 'Добавьте текст отчёта или фотографию')
+        await self.assert_connection_assigned(user_id, day, ticket_id)
+        raw_ticket = await self._client.ticket_by_id(ticket_id)
+        if raw_ticket is None:
+            raise TicketNotFoundError()
+        ticket = TechPortalTicket.model_validate(raw_ticket)
+        if not self._is_master(ticket, user_id) or CONNECTION_TAG not in ticket.tags:
+            raise TicketNotFoundError()
+        updated_tags = dict(ticket.tags)
+        updated_tags[COMPLETED_TAG] = {}
+        raw_ticket['tags'] = updated_tags
+        raw_ticket['comments'] = comment
+        persisted = await self._client.persist_ticket_with_comment(raw_ticket)
+        persisted_fields = {field_name: getattr(persisted, field_name) for field_name in persisted.model_fields_set}
+        users = await self._user_names()
+        return self._normalize(ticket.model_copy(update=persisted_fields), users)
+
+    async def connection_completion_recorded(self, user_id: int | str, ticket_id: int, comment: str) -> bool:
+        raw_ticket = await self._client.ticket_by_id(ticket_id)
+        if raw_ticket is None:
+            return False
+        ticket = TechPortalTicket.model_validate(raw_ticket)
+        if not self._is_master(ticket, user_id) or CONNECTION_TAG not in ticket.tags or COMPLETED_TAG not in ticket.tags:
+            return False
+        return any(
+            any(change.key == 'comments' and self._comment_text(change.value) == comment for change in entry.changes)
+            for entry in ticket.history
+        )
 
     async def dial(self, phone: str, upstream_cookies: dict[str, str]) -> None:
         await self._client.dial(phone, upstream_cookies)

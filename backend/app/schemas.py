@@ -337,6 +337,18 @@ class TicketCompletionRequest(BaseModel):
         return value.strip() if value else None
 
 
+class ConnectionCompletionResponse(BaseModel):
+    id: UUID
+    ticket_id: int
+    completion_status: str
+    gis_status: str
+    gis_report_id: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
 class DialRequest(BaseModel):
     phone: str = Field(min_length=7, max_length=32)
 

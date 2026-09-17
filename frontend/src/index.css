@@ -237,6 +237,17 @@ input:focus, textarea:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px #dbea
 .gis-feature-description { padding-top: .1rem; border-top: 1px solid #e2e8f0; }
 .gis-feature-description h3 { margin: .85rem 0 .35rem; color: #334155; font-size: .9rem; }
 .gis-feature-description p { margin: 0; color: #475569; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.45; }
+.gis-report-form { display: grid; gap: .8rem; margin-top: 1rem; padding-top: .2rem; border-top: 1px solid #e2e8f0; }
+.gis-report-form h3 { margin: .75rem 0 0; color: #334155; font-size: .95rem; }
+.gis-report-form > p { margin: 0; color: #475569; font-size: .86rem; }
+.gis-report-form .primary-button { margin-top: .1rem; }
+.gis-report-photos { color: #64748b !important; }
+.gis-picker { display: grid; gap: .8rem; }
+.gis-picker-button { text-align: left; }
+.gis-clear-feature { width: fit-content; padding: 0; border: 0; color: #64748b; background: transparent; text-decoration: underline; }
+.gis-picker-results { display: grid; gap: .45rem; max-height: 20rem; overflow: auto; }
+.gis-picker-results button { display: grid; gap: .1rem; padding: .65rem; border: 1px solid #dbe2ea; border-radius: .7rem; color: #172033; background: #fff; text-align: left; }
+.gis-picker-results small, .gis-picker-results p { color: #64748b; }
 .tickets-heading {
   display: flex;
   align-items: flex-start;

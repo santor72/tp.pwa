@@ -32,12 +32,14 @@ from app.routers.messengers import router as messengers_router
 from app.routers.payments import router as payments_router
 from app.routers.payment_timings import router as payment_timings_router
 from app.routers.gis import router as gis_router
+from app.routers.completions import router as completions_router
 from app.payment_telemetry import Trace, current_trace, span
 from app.payment_runtime_registry import PaymentRuntimeRegistry
 
 settings = get_settings()
 configure_logging(settings.log_level)
 logger = logging.getLogger(__name__)
+MAX_CONNECTION_COMPLETION_BODY_BYTES = 51 * 1024 * 1024
 
 
 @asynccontextmanager
@@ -57,6 +59,7 @@ async def lifespan(app: FastAPI):
     app.state.ticket_service = app.state.services.ticket_service
     app.state.messenger_links = app.state.services.messenger_links
     app.state.gis_client = app.state.services.gis_client
+    app.state.connection_completion_service = app.state.services.connection_completion_service
     registry = PaymentRuntimeRegistry(app.state.services.sessions, settings.payment_processing_mode)
     app.state.payment_runtime_registry = registry
     owner = 'api:' + uuid.uuid4().hex
@@ -82,6 +85,7 @@ app.include_router(messengers_router)
 app.include_router(payments_router)
 app.include_router(payment_timings_router)
 app.include_router(gis_router)
+app.include_router(completions_router)
 
 
 @app.middleware("http")
@@ -95,6 +99,13 @@ async def request_logging(request: Request, call_next):
         request.state.timing_started_at = datetime.now(UTC)
         request.state.timing_started = started
     try:
+        if request.method == 'POST' and request.url.path.endswith('/connection-completion'):
+            try:
+                content_length = int(request.headers.get('content-length', '0'))
+            except ValueError:
+                raise ApiError(422, 'REPORT_SIZE_LIMIT', 'Размер отчёта превышает допустимый лимит')
+            if content_length > MAX_CONNECTION_COMPLETION_BODY_BYTES:
+                raise ApiError(422, 'REPORT_SIZE_LIMIT', 'Размер отчёта превышает допустимый лимит')
         with span("http_accept", "operation"):
             response = await call_next(request)
         response.headers["X-Request-ID"] = request_id

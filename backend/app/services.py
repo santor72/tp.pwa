@@ -21,6 +21,9 @@ from app.repositories import PaymentRepository, SqlAlchemyMessengerRepository
 from app.techportal_client import TechPortalClient
 from app.tickets import TicketService
 from app.gis_client import GisClient
+from app.object_storage import ObjectStorage
+from app.completion_repository import CompletionRepository
+from app.completion_service import ConnectionCompletionService
 
 
 @dataclass(slots=True)
@@ -37,6 +40,8 @@ class ApplicationServices:
     bitrix: Bitrix24Client
     messenger_links: MessengerLinkService
     gis_client: GisClient
+    completion_repository: CompletionRepository
+    connection_completion_service: ConnectionCompletionService
 
     async def close(self) -> None:
         await self.bitrix.close()
@@ -54,11 +59,14 @@ def create_application_services(settings: Settings, cache_redis: Redis) -> Appli
     bitrix.limiter = PaymentRequestLimiter(events, settings)
     payment_catalog = PaymentProductCatalog(settings, bitrix, cache)
     resolver = PaymentClientResolver(settings, bitrix)
+    ticket_service = TicketService(settings, TechPortalClient(settings), cache)
+    gis_client = GisClient(settings)
+    completion_repository = CompletionRepository(sessions)
     return ApplicationServices(
         engine=engine,
         sessions=sessions,
         auth_provider=TechPortalAuthProvider(settings),
-        ticket_service=TicketService(settings, TechPortalClient(settings), cache),
+        ticket_service=ticket_service,
         payment_addresses=PaymentAddressService(settings, EsbClient(settings), cache),
         payment_catalog=payment_catalog,
         payment_repository=payment_repository,
@@ -66,5 +74,7 @@ def create_application_services(settings: Settings, cache_redis: Redis) -> Appli
         payment_status=PaymentStatusHandler(settings, payment_repository, bitrix),
         bitrix=bitrix,
         messenger_links=MessengerLinkService(sessions, settings.tg_link_token_ttl_seconds, SqlAlchemyMessengerRepository()),
-        gis_client=GisClient(settings),
+        gis_client=gis_client,
+        completion_repository=completion_repository,
+        connection_completion_service=ConnectionCompletionService(completion_repository, ticket_service, ObjectStorage(settings), gis_client),
     )

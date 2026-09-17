@@ -8,7 +8,7 @@ import pytest
 
 from app.cache_store import CacheStore
 from app.config import Settings
-from app.errors import RepairCommentRequiredError, TicketNotFoundError
+from app.errors import ApiError, RepairCommentRequiredError, TicketNotFoundError
 from app.actors import Actor
 from app.schemas import TechPortalTicket, TechPortalUser
 from app.tickets import TicketService
@@ -156,11 +156,14 @@ async def test_completion_uses_authoritative_full_tags_and_can_remove_marker() -
     client = FakeTechPortal([source])
     ticket_service = service(client)
 
-    completed = await ticket_service.set_completed(87, "today", source.id, True)
-    assert client.persist_calls[-1] == (
-        source.id,
-        {"Новое подключение": {}, "Солнечногорск": {}, "Работы произведены": {}},
-    )
+    with pytest.raises(ApiError, match='заполните отчёт'):
+        await ticket_service.set_completed(87, "today", source.id, True)
+    completed = await ticket_service.mark_connection_completed(87, "today", source.id, 'Подключение выполнено')
+    assert client.comment_persist_calls[-1] == {
+        **source.model_dump(mode="json"),
+        "tags": {"Новое подключение": {}, "Солнечногорск": {}, "Работы произведены": {}},
+        "comments": "Подключение выполнено",
+    }
     assert completed.completed is True
     assert completed.address == "СНТ Волга, участок 96, дом 12, кв. 34"
     assert completed.client_phone == "+79254553958"
@@ -176,6 +179,16 @@ async def test_completion_uses_authoritative_full_tags_and_can_remove_marker() -
         {"Новое подключение": {}, "Солнечногорск": {}},
     )
     assert reopened.completed is False
+
+
+@pytest.mark.asyncio
+async def test_connection_completion_reconciliation_requires_same_comment_and_tag() -> None:
+    source = ticket(tags={"Новое подключение": {}, "Работы произведены": {}})
+    source.history[0].changes[0].value = 'Отчёт подключения\nhttps://photos.example/secret-key'
+    ticket_service = service(FakeTechPortal([source]))
+
+    assert await ticket_service.connection_completion_recorded(87, source.id, source.history[0].changes[0].value)
+    assert not await ticket_service.connection_completion_recorded(87, source.id, 'Другой отчёт')
 
 
 @pytest.mark.asyncio
@@ -210,10 +223,10 @@ async def test_repair_requires_comment_and_persists_it_with_completion() -> None
 
 @pytest.mark.asyncio
 async def test_completion_preserves_card_for_sparse_persist_response() -> None:
-    source = ticket()
+    source = ticket(tags={"Заявка на выезд": {}})
     client = FakeTechPortal([source], sparse_persist=True)
 
-    result = await service(client).set_completed(87, "today", source.id, True)
+    result = await service(client).set_completed(87, "today", source.id, True, 'Починили')
 
     assert result.completed is True
     assert result.address == "СНТ Волга, участок 96, дом 12, кв. 34"

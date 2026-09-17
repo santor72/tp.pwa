@@ -82,6 +82,10 @@ export type GisLayer = { id: string; name: string; position: number; count: numb
 export type GisFeature = { type: 'Feature'; id: string; geometry: { type: 'Point' | 'LineString' | 'Polygon'; coordinates: unknown }; properties: { id: string; layer_id: string; title?: string; number?: number; kind: string; iconColor?: string; lineColor?: string; fillColor?: string } }
 export type GisFeatureCollection = { type: 'FeatureCollection'; truncated: boolean; limit: number; features: GisFeature[] }
 export type GisFeatureDetails = { id: string; layer_id: string; map_id: string; layer_name: string; title: string; number: number; kind: string; description: string; geometry: GisFeature['geometry']; style: Record<string, unknown>; version: number }
+export type GisReportReceipt = { id: string; external_report_id: string; repeated: boolean; retention_until: string | null }
+export type GisMapReport = { featureId: string; externalReportId: string; completionId: string; text: string; photos: File[] }
+export type ConnectionCompletion = { id: string; ticket_id: number; completion_status: string; gis_status: string; gis_report_id: string | null; error_code: string | null; error_message: string | null; created_at: string; updated_at: string }
+export type ConnectionCompletionPayload = { day: TicketDay; idempotencyKey: string; text: string; featureId?: string; photos: File[] }
 
 export class ApiError extends Error {
   constructor(public readonly status: number, public readonly code: string, message: string) {
@@ -162,4 +166,23 @@ export const api = {
   gisBounds: (mapId: string) => request<{ xmin: number; ymin: number; xmax: number; ymax: number }>(`/api/gis/maps/${mapId}/bounds`),
   gisFeatures: (mapId: string, bbox: [number, number, number, number], layers: string[]) => request<GisFeatureCollection>(`/api/gis/maps/${mapId}/features?bbox=${bbox.join(',')}${layers.length ? `&layers=${encodeURIComponent(layers.join(','))}` : ''}`),
   gisFeature: (featureId: string) => request<GisFeatureDetails>(`/api/gis/features/${featureId}`),
+  createGisReport: (report: GisMapReport, csrfToken: string) => {
+    const body = new FormData()
+    body.set('feature_id', report.featureId)
+    body.set('external_report_id', report.externalReportId)
+    body.set('completion_id', report.completionId)
+    body.set('text', report.text)
+    report.photos.forEach(photo => body.append('photos', photo, photo.name))
+    return request<GisReportReceipt>('/api/gis/reports', { method: 'POST', headers: { 'X-CSRF-Token': csrfToken }, body })
+  },
+  completeConnection: (ticketId: number, payload: ConnectionCompletionPayload, csrfToken: string) => {
+    const body = new FormData()
+    body.set('day', payload.day)
+    body.set('idempotency_key', payload.idempotencyKey)
+    body.set('text', payload.text)
+    if (payload.featureId) body.set('feature_id', payload.featureId)
+    payload.photos.forEach(photo => body.append('photos', photo, photo.name))
+    return request<ConnectionCompletion>(`/api/tickets/${ticketId}/connection-completion`, { method: 'POST', headers: { 'X-CSRF-Token': csrfToken }, body })
+  },
+  connectionCompletion: (operationId: string) => request<ConnectionCompletion>(`/api/tickets/connection-completions/${operationId}`),
 }

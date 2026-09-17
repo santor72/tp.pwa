@@ -259,3 +259,36 @@ class PaymentRuntimeMember(Base):
     host: Mapped[str] = mapped_column(String(128), nullable=False)
     mode: Mapped[str] = mapped_column(String(16), nullable=False)
     healthy_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ConnectionCompletionOperation(Base):
+    __tablename__ = 'connection_completion_operations'
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    idempotency_key: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, unique=True)
+    ticket_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    day: Mapped[str] = mapped_column(String(16), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='RESTRICT'), nullable=False)
+    technician_external_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    technician_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    feature_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    feature_snapshot: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    external_report_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), unique=True)
+    report_text: Mapped[str] = mapped_column(Text, nullable=False, default='')
+    photos: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    techportal_comment: Mapped[str | None] = mapped_column(Text)
+    completion_status: Mapped[str] = mapped_column(String(32), nullable=False, default='prepared')
+    gis_status: Mapped[str] = mapped_column(String(32), nullable=False, default='not_requested')
+    gis_report_id: Mapped[str | None] = mapped_column(String(128))
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error_code: Mapped[str | None] = mapped_column(String(128))
+    last_error_message: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index('ix_connection_completion_gis_due', 'gis_status', 'next_attempt_at'),
+        Index('ix_connection_completion_ticket_created', 'ticket_id', 'created_at'),
+    )

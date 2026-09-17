@@ -54,6 +54,15 @@ class Settings(BaseSettings):
     gis_base_url: str = ''
     gis_api_token: SecretStr = SecretStr('')
     gis_timeout_seconds: float = Field(default=20.0, gt=0, le=120)
+    s3_endpoint_url: str = ''
+    s3_access_key_id: str = ''
+    s3_secret_access_key: SecretStr = SecretStr('')
+    s3_bucket: str = ''
+    s3_region: str = 'us-east-1'
+    s3_public_base_url: str = ''
+    s3_timeout_seconds: float = Field(default=20.0, gt=0, le=120)
+    gis_completion_worker_poll_seconds: float = Field(default=5.0, gt=0, le=300)
+    gis_completion_worker_batch_size: int = Field(default=10, ge=1, le=100)
 
     redis_host: str = "redis"
     redis_port: int = 6379
@@ -126,6 +135,22 @@ class Settings(BaseSettings):
             value = f'https://{value}'
         if value and urlsplit(value).scheme not in {'http', 'https'}:
             raise ValueError('GIS_BASE_URL должен использовать http:// или https://')
+        return value
+
+    @field_validator('s3_endpoint_url')
+    @classmethod
+    def normalize_s3_endpoint_url(cls, value: str) -> str:
+        value = value.strip().rstrip('/')
+        if value and urlsplit(value).scheme != 'http':
+            raise ValueError('S3_ENDPOINT_URL должен использовать внутренний http://')
+        return value
+
+    @field_validator('s3_public_base_url')
+    @classmethod
+    def normalize_s3_public_base_url(cls, value: str) -> str:
+        value = value.strip().rstrip('/')
+        if value and urlsplit(value).scheme not in {'http', 'https'}:
+            raise ValueError('S3_PUBLIC_BASE_URL должен использовать http:// или https://')
         return value
 
     @field_validator("bx24_webhook")
