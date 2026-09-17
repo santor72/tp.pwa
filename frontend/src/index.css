@@ -243,6 +243,13 @@ input:focus, textarea:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px #dbea
 .gis-report-form .primary-button { margin-top: .1rem; }
 .gis-report-photos { color: #64748b !important; }
 .gis-picker { display: grid; gap: .8rem; }
+.gis-picker .gis-map-canvas { min-height: 22rem; }
+.gis-picker .gis-map-canvas svg { min-height: 22rem; }
+.gis-map-notice { margin: 0; color: #64748b; font-size: .8rem; }
+.gis-picker-selection { display: grid; gap: .7rem; padding: .8rem; border: 1px solid #bfdbfe; border-radius: .9rem; background: #eff6ff; }
+.gis-picker-selection header { padding-bottom: .55rem; }
+.gis-picker-selection h3 { margin: .15rem 0 0; color: #172033; font-size: 1rem; }
+.gis-picker-actions { display: flex; flex-wrap: wrap; gap: .55rem; justify-content: flex-end; }
 .gis-picker-button { text-align: left; }
 .gis-clear-feature { width: fit-content; padding: 0; border: 0; color: #64748b; background: transparent; text-decoration: underline; }
 .gis-picker-results { display: grid; gap: .45rem; max-height: 20rem; overflow: auto; }

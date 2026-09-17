@@ -585,4 +585,32 @@ describe('Заявки', () => {
     expect(form.get('idempotency_key')).toMatch(/^[0-9a-f-]{36}$/)
     expect(new Headers(completionRequest?.headers).get('X-CSRF-Token')).toBe('csrf-test')
   })
+
+  it('выбирает объект подключения полноценной картой и запоминает карту', async () => {
+    const mapId = '11111111-1111-4111-8111-111111111111'
+    const layerId = '22222222-2222-4222-8222-222222222222'
+    const featureId = '33333333-3333-4333-8333-333333333333'
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input)
+      if (path === '/api/auth/session') return json(session)
+      if (path === '/api/tickets/today') return json([ticket])
+      if (path === '/api/gis/maps') return json({ rows: [{ id: mapId, name: 'Чехов', created_at: '2026-09-16T09:00:00Z', report: { total: 1 } }] })
+      if (path === `/api/gis/maps/${mapId}/layers`) return json({ rows: [{ id: layerId, name: 'Муфты', position: 1, count: 1, version: 1 }] })
+      if (path === `/api/gis/maps/${mapId}/bounds`) return json({ xmin: 37.1, ymin: 55, xmax: 37.3, ymax: 55.2 })
+      if (path.startsWith(`/api/gis/maps/${mapId}/features?bbox=`)) return json({ type: 'FeatureCollection', truncated: false, limit: 40000, features: [{ type: 'Feature', id: featureId, geometry: { type: 'Point', coordinates: [37.2, 55.1] }, properties: { id: featureId, layer_id: layerId, kind: 'Point', title: 'Муфта 1', iconColor: '#0288d1' } }] })
+      if (path === `/api/gis/features/${featureId}`) return json({ id: featureId, layer_id: layerId, map_id: mapId, layer_name: 'Муфты', title: 'Муфта 1', number: 42, kind: 'Point', description: '', geometry: { type: 'Point', coordinates: [37.2, 55.1] }, style: {}, version: 3 })
+      throw new Error(`Неожиданный запрос: ${path}`)
+    }))
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: /СНТ Волга/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Выбрать объект на карте' }))
+    const map = await screen.findByRole('application', { name: 'Карта сети' })
+    expect(screen.queryByText(/^Слои/)).toBeNull()
+    await waitFor(() => expect(map.querySelector('.gis-point')).not.toBeNull())
+    fireEvent.click(map.querySelector('.gis-point')!)
+    expect(await screen.findByRole('button', { name: 'Выбрать этот объект' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Выбрать этот объект' }))
+    expect(await screen.findByLabelText('Отчёт для GIS')).toBeTruthy()
+    expect(localStorage.getItem('tp-pwa.gis.selected-map')).toBe(mapId)
+  })
 })

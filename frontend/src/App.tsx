@@ -589,42 +589,137 @@ function GisFeaturePicker({ value, onChange }: { value: string; onChange: (value
   const [open, setOpen] = useState(false)
   const [maps, setMaps] = useState<GisMap[]>([])
   const [mapId, setMapId] = useState('')
-  const [features, setFeatures] = useState<GisFeature[]>([])
-  const [query, setQuery] = useState('')
+  const [data, setData] = useState<GisFeatureCollection | null>(null)
+  const [layers, setLayers] = useState<GisLayer[]>([])
+  const [selected, setSelected] = useState<GisFeature | null>(null)
+  const [mapView, setMapView] = useState<GisMapView | null>(null)
+  const [fallbackBounds, setFallbackBounds] = useState<[number, number, number, number] | null>(null)
+  const [viewportBounds, setViewportBounds] = useState<[number, number, number, number] | null>(null)
+  const [position, setPosition] = useState<Position | null>(null)
+  const [locating, setLocating] = useState(false)
+  const [locationNotice, setLocationNotice] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [detailsLoading, setDetailsLoading] = useState(false)
+  const [detailsError, setDetailsError] = useState('')
+  const [details, setDetails] = useState<GisFeatureDetails | null>(null)
+  const initialPositionApplied = useRef(false)
+  const savedViewRestored = useRef(false)
+
   useEffect(() => {
     if (!open || maps.length) return
     setLoading(true); setError('')
-    api.gisMaps().then(result => { setMaps(result.rows); setMapId(result.rows[0]?.id || '') }).catch(cause => setError(errorMessage(cause))).finally(() => setLoading(false))
+    api.gisMaps().then(result => {
+      setMaps(result.rows)
+      let savedId = ''
+      try { savedId = window.localStorage.getItem(GIS_SELECTED_MAP_KEY) || '' } catch { /* storage may be unavailable */ }
+      setMapId(result.rows.find(map => map.id === savedId)?.id || result.rows[0]?.id || '')
+    }).catch(cause => setError(errorMessage(cause))).finally(() => setLoading(false))
   }, [open, maps.length])
+
   useEffect(() => {
-    if (!open || !mapId) return
+    if (!mapId) return
+    try { window.localStorage.setItem(GIS_SELECTED_MAP_KEY, mapId) } catch { /* storage may be unavailable */ }
+  }, [mapId])
+
+  useEffect(() => {
+    if (!open || !mapId || !maps.length) return
     let active = true
-    setLoading(true); setError(''); setFeatures([])
-    Promise.all([api.gisBounds(mapId), api.gisLayers(mapId)]).then(async ([bounds, layers]) => {
-      const data = await api.gisFeatures(mapId, [bounds.xmin, bounds.ymin, bounds.xmax, bounds.ymax], layers.rows.map(layer => layer.id))
-      if (active) setFeatures(data.features)
+    setLoading(true); setError(''); setData(null); setLayers([]); setFallbackBounds(null); setViewportBounds(null); setMapView(null)
+    initialPositionApplied.current = false
+    savedViewRestored.current = false
+    try {
+      const saved = window.sessionStorage.getItem(`${GIS_MAP_VIEW_KEY}:${mapId}`)
+      if (saved) {
+        const parsed = JSON.parse(saved) as Partial<GisMapView>
+        if (typeof parsed.longitude === 'number' && typeof parsed.latitude === 'number' && typeof parsed.zoom === 'number') {
+          setMapView({ longitude: parsed.longitude, latitude: parsed.latitude, zoom: parsed.zoom })
+          savedViewRestored.current = true
+          initialPositionApplied.current = true
+        }
+      }
+    } catch { /* storage may be unavailable or contain invalid data */ }
+    Promise.all([api.gisBounds(mapId), api.gisLayers(mapId)]).then(([bounds, result]) => {
+      if (!active) return
+      setFallbackBounds([bounds.xmin, bounds.ymin, bounds.xmax, bounds.ymax])
+      setLayers(result.rows)
     }).catch(cause => active && setError(errorMessage(cause))).finally(() => active && setLoading(false))
     return () => { active = false }
-  }, [open, mapId])
-  const visible = features.filter(feature => {
-    const label = `${feature.properties.title || ''} ${feature.properties.number || ''} ${feature.properties.kind}`.toLocaleLowerCase('ru')
-    return !query.trim() || label.includes(query.trim().toLocaleLowerCase('ru'))
-  }).slice(0, 200)
-  const selected = features.find(feature => feature.id === value)
+  }, [open, mapId, maps.length])
+
+  useEffect(() => {
+    if (!open || mapView || !fallbackBounds) return
+    if (position && !initialPositionApplied.current) {
+      setMapView({ longitude: position.longitude, latitude: position.latitude, zoom: GIS_DEFAULT_ZOOM })
+      initialPositionApplied.current = true
+    } else if (!position) {
+      setMapView({ longitude: (fallbackBounds[0] + fallbackBounds[2]) / 2, latitude: (fallbackBounds[1] + fallbackBounds[3]) / 2, zoom: 13 })
+    }
+  }, [open, fallbackBounds?.join(','), mapView, position?.latitude, position?.longitude])
+
+  const handleViewChange = useCallback((nextView: GisMapView) => {
+    setMapView(nextView)
+    if (mapId) {
+      try { window.sessionStorage.setItem(`${GIS_MAP_VIEW_KEY}:${mapId}`, JSON.stringify(nextView)) } catch { /* storage may be unavailable */ }
+    }
+  }, [mapId])
+  const updateViewportBounds = useCallback((bounds: [number, number, number, number]) => {
+    setViewportBounds(previous => previous?.every((item, index) => Math.abs(item - bounds[index]) < .000001) ? previous : bounds)
+  }, [])
+  useEffect(() => {
+    if (!open || !mapId || !viewportBounds || !layers.length) return
+    let active = true
+    const timer = window.setTimeout(() => api.gisFeatures(mapId, viewportBounds, layers.map(layer => layer.id)).then(result => active && setData(result)).catch(cause => active && setError(errorMessage(cause))), 250)
+    return () => { active = false; window.clearTimeout(timer) }
+  }, [open, mapId, layers.map(layer => layer.id).join(','), viewportBounds?.join(',')])
+  useEffect(() => {
+    if (!open || !navigator.geolocation) { if (open) setLocationNotice('Геолокация не поддерживается устройством'); return }
+    const watch = navigator.geolocation.watchPosition(value => {
+      const next = { longitude: value.coords.longitude, latitude: value.coords.latitude, accuracy: value.coords.accuracy }
+      setPosition(next)
+      if (!savedViewRestored.current && !initialPositionApplied.current) {
+        setMapView({ longitude: next.longitude, latitude: next.latitude, zoom: GIS_DEFAULT_ZOOM }); initialPositionApplied.current = true
+      }
+      setLocationNotice('Ваше местоположение показано синим маркером')
+    }, () => setLocationNotice('Местоположение недоступно. Картой можно пользоваться вручную.'), { enableHighAccuracy: true, maximumAge: 30_000, timeout: 12_000 })
+    return () => navigator.geolocation.clearWatch(watch)
+  }, [open])
+  const locate = useCallback(() => {
+    if (!navigator.geolocation) { setLocationNotice('Геолокация не поддерживается устройством'); return }
+    setLocating(true)
+    navigator.geolocation.getCurrentPosition(value => {
+      const next = { longitude: value.coords.longitude, latitude: value.coords.latitude, accuracy: value.coords.accuracy }
+      setPosition(next); handleViewChange({ longitude: next.longitude, latitude: next.latitude, zoom: GIS_DEFAULT_ZOOM }); setLocationNotice('Карта центрирована на вашем местоположении'); setLocating(false)
+    }, () => { setLocationNotice('Местоположение недоступно. Картой можно пользоваться вручную.'); setLocating(false) }, { enableHighAccuracy: true, maximumAge: 0, timeout: 12_000 })
+  }, [handleViewChange])
+  const openFeature = (feature: GisFeature) => {
+    setSelected(feature); setDetails(null); setDetailsError(''); setDetailsLoading(true)
+    api.gisFeature(feature.id).then(setDetails).catch(cause => setDetailsError(errorMessage(cause))).finally(() => setDetailsLoading(false))
+  }
+  const closePicker = () => { setOpen(false); setSelected(null); setDetails(null); setDetailsError('') }
+  const chosenFeature = selected || data?.features.find(feature => feature.id === value) || null
+  const selectedTitle = chosenFeature ? chosenFeature.properties.title || (chosenFeature.properties.number !== undefined ? `Объект №${chosenFeature.properties.number}` : 'Объект сети') : ''
+  const selectedLayer = details?.layer_name || layers.find(layer => layer.id === selected?.properties.layer_id)?.name || 'Объект сети'
   return <>
-    <button type="button" className="outline-button gis-picker-button" onClick={() => setOpen(true)}>{selected ? `Объект: ${selected.properties.title || `№${selected.properties.number || selected.id}`}` : 'Выбрать объект на карте'}</button>
+    <button type="button" className="outline-button gis-picker-button" onClick={() => setOpen(true)}>{value ? `Объект: ${selectedTitle || value}` : 'Выбрать объект на карте'}</button>
     {value && <button type="button" className="gis-clear-feature" onClick={() => onChange('')}>Не отправлять в GIS</button>}
-    {open && <div className="gis-feature-backdrop" onClick={() => setOpen(false)}>
+    {open && <div className="gis-feature-backdrop" onClick={closePicker}>
       <aside className="gis-feature-card gis-picker" role="dialog" aria-modal="true" aria-label="Выбрать объект GIS" onClick={event => event.stopPropagation()}>
         <div className="gis-feature-handle" />
-        <header><div><small>Объект необязателен</small><h2>Выбрать объект GIS</h2></div><button type="button" onClick={() => setOpen(false)} aria-label="Закрыть выбор объекта">×</button></header>
-        {maps.length > 1 && <label className="field"><span>Карта</span><select value={mapId} onChange={event => setMapId(event.target.value)}>{maps.map(map => <option key={map.id} value={map.id}>{map.name}</option>)}</select></label>}
-        <input className="search-input" type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Поиск объекта" aria-label="Поиск объекта GIS" />
+        <header><div><small>Объект необязателен</small><h2>Выбрать объект GIS</h2></div><button type="button" onClick={closePicker} aria-label="Закрыть выбор объекта">×</button></header>
+        {maps.length > 1 && <label className="field"><span>Карта</span><select value={mapId} onChange={event => { setMapId(event.target.value); try { window.localStorage.setItem(GIS_SELECTED_MAP_KEY, event.target.value) } catch { /* storage may be unavailable */ } }}>{maps.map(map => <option key={map.id} value={map.id}>{map.name}</option>)}</select></label>}
         {loading && <p className="gis-feature-loading">Загружаем объекты…</p>}
         {error && <ErrorBox text={error} />}
-        {!loading && !error && <div className="gis-picker-results">{visible.map(feature => <button type="button" key={feature.id} onClick={() => { onChange(feature.id); setOpen(false) }}><strong>{feature.properties.title || `Объект №${feature.properties.number || 'без номера'}`}</strong><small>{feature.properties.kind}</small></button>)}{features.length > 200 && <p>Показаны первые 200 объектов. Уточните поиск.</p>}{features.length === 0 && <p>На карте нет доступных объектов.</p>}</div>}
+        {locationNotice && <p className="gis-map-notice">{locationNotice}</p>}
+        {mapView && <MapCanvas data={data} position={position} view={mapView} onViewChange={handleViewChange} onBoundsChange={updateViewportBounds} onSelect={openFeature} onLocate={locate} locating={locating} />}
+        {data?.truncated && <div className="error-box">Показана не вся сеть. Уточните область на карте.</div>}
+        {selected && <section className="gis-picker-selection" aria-label="Подтверждение объекта GIS">
+          <header><div><small>{selectedLayer}</small><h3>{details?.title || selectedTitle}</h3></div><button type="button" onClick={() => setSelected(null)} aria-label="Вернуться к карте">×</button></header>
+          {detailsLoading && <p className="gis-feature-loading">Загружаем карточку объекта…</p>}
+          {detailsError && <ErrorBox text={detailsError} />}
+          {details && <dl className="gis-feature-details"><div><dt>Тип</dt><dd>{details.kind}</dd></div>{details.number !== null && <div><dt>Номер</dt><dd>{details.number}</dd></div>}</dl>}
+          <div className="gis-picker-actions"><button type="button" className="outline-button" onClick={() => setSelected(null)}>Назад к карте</button><button type="button" className="primary-button" onClick={() => { onChange(selected.id); closePicker() }}>Выбрать этот объект</button></div>
+        </section>}
       </aside>
     </div>}
   </>
