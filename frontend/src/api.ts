@@ -85,7 +85,7 @@ export type GisFeatureDetails = { id: string; layer_id: string; map_id: string; 
 export type GisReportReceipt = { id: string; external_report_id: string; repeated: boolean; retention_until: string | null }
 export type GisMapReport = { featureId: string; externalReportId: string; completionId: string; text: string; photos: File[] }
 export type ConnectionCompletion = { id: string; ticket_id: number; completion_status: string; gis_status: string; gis_report_id: string | null; error_code: string | null; error_message: string | null; created_at: string; updated_at: string }
-export type ConnectionCompletionPayload = { day: TicketDay; idempotencyKey: string; text: string; featureId?: string; photos: File[] }
+export type ConnectionCompletionPayload = { day: TicketDay; idempotencyKey: string; techportalText: string; gisText: string; featureId?: string; photos: File[] }
 
 export class ApiError extends Error {
   constructor(public readonly status: number, public readonly code: string, message: string) {
@@ -179,7 +179,8 @@ export const api = {
     const body = new FormData()
     body.set('day', payload.day)
     body.set('idempotency_key', payload.idempotencyKey)
-    body.set('text', payload.text)
+    body.set('techportal_text', payload.techportalText)
+    body.set('gis_text', payload.gisText)
     if (payload.featureId) body.set('feature_id', payload.featureId)
     payload.photos.forEach(photo => body.append('photos', photo, photo.name))
     return request<ConnectionCompletion>(`/api/tickets/${ticketId}/connection-completion`, { method: 'POST', headers: { 'X-CSRF-Token': csrfToken }, body })

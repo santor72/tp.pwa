@@ -50,14 +50,14 @@ def test_connection_completion_requires_csrf_and_passes_server_context():
     app.dependency_overrides[require_csrf] = csrf_override
     key = uuid4()
     response = TestClient(app).post('/api/tickets/32412/connection-completion', data={
-        'day': 'today', 'idempotency_key': str(key), 'text': '  Подключили  ',
+        'day': 'today', 'idempotency_key': str(key), 'techportal_text': '  Подключили  ',
     })
 
     assert response.status_code == 200
     actor, values = completion.begin_args
     assert actor.techportal_user_id == '17'
     assert values == {
-        'ticket_id': 32412, 'day': 'today', 'idempotency_key': key, 'text': 'Подключили',
+        'ticket_id': 32412, 'day': 'today', 'idempotency_key': key, 'techportal_text': 'Подключили', 'gis_text': '',
         'feature_id': None, 'photos': [], 'technician_name': 'Монтажник',
     }
 
@@ -79,8 +79,8 @@ def test_connection_completion_rejects_empty_report_before_service():
 
     app.dependency_overrides[require_csrf] = csrf_override
     response = TestClient(app).post('/api/tickets/32412/connection-completion', data={
-        'day': 'today', 'idempotency_key': str(uuid4()), 'text': ' ',
+        'day': 'today', 'idempotency_key': str(uuid4()), 'techportal_text': ' ',
     })
     assert response.status_code == 422
-    assert response.json()['detail'] == 'Добавьте текст отчёта или фотографию'
+    assert response.json()['detail'] == 'Добавьте текст для ТехПортала или фотографию'
     assert completion.begin_args is None

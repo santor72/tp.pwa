@@ -19,19 +19,25 @@ class ConnectionCompletionService:
         self._gis = gis
 
     async def begin(self, actor: Actor, *, ticket_id: int, day: str, idempotency_key: UUID,
-                    text: str, feature_id: UUID | None, photos: list[dict[str, Any]], technician_name: str) -> Any:
+                    techportal_text: str, gis_text: str, feature_id: UUID | None,
+                    photos: list[dict[str, Any]], technician_name: str) -> Any:
         await self._tickets.assert_connection_assigned(actor.techportal_user_id, day, ticket_id)
+        if not techportal_text and not photos:
+            raise ApiError(422, 'CONNECTION_REPORT_REQUIRED', 'Добавьте текст для ТехПортала или фотографию')
+        if feature_id and not gis_text and not photos:
+            raise ApiError(422, 'GIS_REPORT_REQUIRED', 'Добавьте текст отчёта GIS или фотографию')
         feature_snapshot = await self._gis.feature(str(feature_id)) if feature_id else {}
         operation, created = await self._repository.create_or_get(
             idempotency_key=idempotency_key, ticket_id=ticket_id, day=day, user_id=actor.user_id,
             technician_external_id=actor.techportal_user_id, technician_name=technician_name,
             feature_id=feature_id, feature_snapshot=feature_snapshot, external_report_id=uuid4() if feature_id else None,
-            report_text=text, photos=[], completion_status='prepared',
+            techportal_text=techportal_text, gis_text=gis_text, photos=[], completion_status='prepared',
             gis_status='not_ready' if feature_id else 'not_requested',
         )
         if not created:
             if (operation.user_id != actor.user_id or operation.ticket_id != ticket_id or operation.day != day
-                    or operation.report_text != text or operation.feature_id != feature_id):
+                    or operation.techportal_text != techportal_text or operation.gis_text != gis_text
+                    or operation.feature_id != feature_id):
                 raise ApiError(409, 'COMPLETION_IDEMPOTENCY_CONFLICT', 'Этот ключ уже использован для другого отчёта')
             return operation
         uploaded = []
@@ -46,7 +52,7 @@ class ConnectionCompletionService:
             await self._repository.update(operation.id, completion_status='completion_failed',
                                           last_error_code=exc.code, last_error_message=exc.message)
             raise
-        comment = self._comment(text, uploaded)
+        comment = self._comment(techportal_text, uploaded)
         return await self._repository.update(operation.id, photos=uploaded, techportal_comment=comment, completion_status='marking')
 
     async def mark_techportal(self, operation_id: UUID) -> Any:
@@ -119,7 +125,7 @@ class ConnectionCompletionService:
                 'completion_id': str(operation.id), 'feature_id': str(operation.feature_id),
                 'technician': {'id': operation.technician_external_id, 'name': operation.technician_name},
                 'occurred_at': operation.created_at.astimezone(UTC).isoformat().replace('+00:00', 'Z'),
-                'text': operation.report_text,
+                'text': operation.gis_text,
             }, photos)
         except ServiceUnavailableError as exc:
             try:

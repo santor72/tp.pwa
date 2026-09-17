@@ -556,7 +556,7 @@ describe('Заявки', () => {
     vi.useRealTimers()
 
     expect(await screen.findByRole('heading', { name: 'Заявка №32412' })).toBeTruthy()
-    expect(screen.getByLabelText('Отчёт о выполненных работах')).toBeTruthy()
+    expect(screen.getByLabelText('Отчёт для ТехПортала')).toBeTruthy()
     expect(fetchMock.mock.calls.some(([path]) => String(path).endsWith('/completion'))).toBe(false)
   })
 
@@ -575,12 +575,13 @@ describe('Заявки', () => {
     vi.stubGlobal('fetch', fetchMock)
     render(<App />)
     fireEvent.click(await screen.findByRole('button', { name: /СНТ Волга/ }))
-    fireEvent.change(screen.getByLabelText('Отчёт о выполненных работах'), { target: { value: 'Подключили услугу' } })
+    fireEvent.change(screen.getByLabelText('Отчёт для ТехПортала'), { target: { value: 'Комментарий ТП' } })
     fireEvent.click(screen.getByRole('button', { name: 'Отметить выполненной' }))
     expect(await screen.findByText('Заявка отмечена выполненной. Отчёт добавлен в ТехПортал.')).toBeTruthy()
     const form = completionRequest?.body as FormData
     expect(form.get('day')).toBe('today')
-    expect(form.get('text')).toBe('Подключили услугу')
+    expect(form.get('techportal_text')).toBe('Комментарий ТП')
+    expect(form.get('gis_text')).toBe('')
     expect(form.get('idempotency_key')).toMatch(/^[0-9a-f-]{36}$/)
     expect(new Headers(completionRequest?.headers).get('X-CSRF-Token')).toBe('csrf-test')
   })

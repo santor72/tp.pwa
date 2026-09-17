@@ -647,9 +647,10 @@ function TicketDetails({
   onBack: () => void
   onToggle: (comment?: string) => void
   onDial: (phone: string) => void
-  onCompleteConnection: (text: string, photos: File[], featureId: string | undefined, idempotencyKey: string) => Promise<ConnectionCompletion>
+  onCompleteConnection: (techportalText: string, gisText: string, photos: File[], featureId: string | undefined, idempotencyKey: string) => Promise<ConnectionCompletion>
 }) {
-  const [comment, setComment] = useState('')
+  const [techportalText, setTechportalText] = useState('')
+  const [gisText, setGisText] = useState('')
   const [photos, setPhotos] = useState<File[]>([])
   const [featureId, setFeatureId] = useState('')
   const [completion, setCompletion] = useState<ConnectionCompletion | null>(null)
@@ -676,11 +677,13 @@ function TicketDetails({
     return () => window.clearInterval(timer)
   }, [completion?.id, completion?.completion_status, completion?.gis_status])
   async function submitConnection() {
-    const text = comment.trim()
-    if (!text && !photos.length) { setCompletionError('Добавьте текст отчёта или фотографию'); return }
+    const portalText = techportalText.trim()
+    const mapText = gisText.trim()
+    if (!portalText && !photos.length) { setCompletionError('Добавьте текст для ТехПортала или фотографию'); return }
+    if (featureId.trim() && !mapText && !photos.length) { setCompletionError('Добавьте текст отчёта GIS или фотографию'); return }
     setSubmitting(true); setCompletionError('')
     try {
-      setCompletion(await onCompleteConnection(text, photos, featureId.trim() || undefined, completionIdempotencyKey.current))
+      setCompletion(await onCompleteConnection(portalText, mapText, photos, featureId.trim() || undefined, completionIdempotencyKey.current))
     } catch (cause) {
       setCompletionError(errorMessage(cause))
     } finally {
@@ -713,14 +716,16 @@ function TicketDetails({
           <h2>Описание</h2>
           <p>{ticket.description || 'Описание отсутствует'}</p>
         </div>
-        {editable && (needsComment || isConnectionReport) && <Field label={isConnectionReport ? 'Отчёт о выполненных работах' : 'Что выполнено'} required><textarea aria-label={isConnectionReport ? 'Отчёт о выполненных работах' : 'Что выполнено'} value={comment} onChange={event => setComment(event.target.value)} rows={4} placeholder="Опишите выполненные работы" /></Field>}
+        {editable && needsComment && <Field label="Что выполнено" required><textarea aria-label="Что выполнено" value={techportalText} onChange={event => setTechportalText(event.target.value)} rows={4} placeholder="Опишите выполненные работы" /></Field>}
         {editable && isConnectionReport && <>
+          <Field label="Отчёт для ТехПортала"><textarea aria-label="Отчёт для ТехПортала" value={techportalText} onChange={event => setTechportalText(event.target.value)} rows={3} placeholder="Комментарий о выполненных работах" /></Field>
           <Field label="Фотографии"><input aria-label="Фотографии выполнения" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" multiple onChange={event => setPhotos(Array.from(event.target.files ?? []))} /></Field>
           <div className="field"><span>Объект GIS — необязательно</span><GisFeaturePicker value={featureId} onChange={setFeatureId} /></div>
+          {featureId && <Field label="Отчёт для GIS"><textarea aria-label="Отчёт для GIS" value={gisText} onChange={event => setGisText(event.target.value)} rows={3} placeholder="Описание для отчёта GIS" /></Field>}
           {completionError && <ErrorBox text={completionError} />}
         </>}
         {completionNotice && <div className={completion?.completion_status === 'completed' ? 'success-box' : 'error-box'}>{completionNotice}</div>}
-        {editable && <button className="primary-button" disabled={busy || submitting || (needsComment && !comment.trim())} onClick={() => isConnectionReport ? void submitConnection() : onToggle(needsComment ? comment.trim() : undefined)}>
+        {editable && <button className="primary-button" disabled={busy || submitting || (needsComment && !techportalText.trim())} onClick={() => isConnectionReport ? void submitConnection() : onToggle(needsComment ? techportalText.trim() : undefined)}>
           {submitting ? 'Сохраняем…' : busy ? 'Сохранение…' : isConnectionReport ? 'Отметить выполненной' : needsComment ? 'Завершить ремонт' : ticket.completed ? 'Вернуть в работу' : 'Отметить исполненной'}
         </button>}
       </div>
@@ -836,8 +841,8 @@ function Tickets({ day, session }: { day: TicketDay; session: Session }) {
           onBack={() => { setSelectedId(null); setError('') }}
           onToggle={comment => toggle(selected, comment)}
           onDial={phone => dial(selected, phone)}
-          onCompleteConnection={async (text, photos, featureId, idempotencyKey) => {
-            const completion = await api.completeConnection(selected.id, { day, idempotencyKey, text, photos, featureId }, session.csrf_token)
+          onCompleteConnection={async (techportalText, gisText, photos, featureId, idempotencyKey) => {
+            const completion = await api.completeConnection(selected.id, { day, idempotencyKey, techportalText, gisText, photos, featureId }, session.csrf_token)
             if (completion.completion_status === 'completed') {
               setTickets(current => current.map(item => item.id === selected.id ? { ...item, completed: true } : item))
             }

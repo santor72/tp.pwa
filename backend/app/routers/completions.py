@@ -25,18 +25,22 @@ async def complete_connection(
     request: Request,
     day: str = Form(),
     idempotency_key: UUID = Form(),
-    text: str = Form(default='', max_length=10_000),
+    techportal_text: str = Form(default='', max_length=10_000),
+    gis_text: str = Form(default='', max_length=10_000),
     feature_id: UUID | None = Form(default=None),
     photos: list[UploadFile] = File(default=[]),
     session_pair: tuple[str, SessionData] = Depends(require_csrf),
 ):
-    report_text = text.strip()
+    techportal_report_text = techportal_text.strip()
+    gis_report_text = gis_text.strip()
     if day not in {'today', 'tomorrow'}:
         raise ApiError(422, 'VALIDATION_ERROR', 'Укажите день заявки')
     if len(photos) > 5:
         raise ApiError(422, 'REPORT_PHOTOS_LIMIT', 'В одном отчёте можно загрузить до 5 фотографий')
-    if not report_text and not photos:
-        raise ApiError(422, 'CONNECTION_REPORT_REQUIRED', 'Добавьте текст отчёта или фотографию')
+    if not techportal_report_text and not photos:
+        raise ApiError(422, 'CONNECTION_REPORT_REQUIRED', 'Добавьте текст для ТехПортала или фотографию')
+    if feature_id and not gis_report_text and not photos:
+        raise ApiError(422, 'GIS_REPORT_REQUIRED', 'Добавьте текст отчёта GIS или фотографию')
     payload_photos = []
     for photo in photos:
         content_type = photo.content_type or ''
@@ -48,7 +52,8 @@ async def complete_connection(
     technician_name = (session.user.first_name or session.user.email).strip() or str(session.user.id)
     operation = await request.app.state.connection_completion_service.begin(
         actor, ticket_id=ticket_id, day=day, idempotency_key=idempotency_key,
-        text=report_text, feature_id=feature_id, photos=payload_photos, technician_name=technician_name,
+        techportal_text=techportal_report_text, gis_text=gis_report_text, feature_id=feature_id,
+        photos=payload_photos, technician_name=technician_name,
     )
     operation = await request.app.state.connection_completion_service.mark_techportal(operation.id)
     return response(operation)

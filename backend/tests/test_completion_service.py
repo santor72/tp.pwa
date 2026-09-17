@@ -89,13 +89,13 @@ async def test_connection_completion_adds_s3_links_to_techportal_comment_without
     subject = service()
     actor = Actor(user_id=uuid4(), techportal_user_id='17', channel='pwa')
     operation = await subject.begin(actor, ticket_id=12, day='today', idempotency_key=uuid4(),
-                                    text='  Подключили  ', feature_id=None, technician_name='Монтажник',
+                                    techportal_text='  В ТехПортал  ', gis_text='В GIS', feature_id=None, technician_name='Монтажник',
                                     photos=[{'name': 'work.jpg', 'content_type': 'image/jpeg', 'content': b'photo'}])
     operation = await subject.mark_techportal(operation.id)
 
     assert operation.completion_status == 'completed'
     assert operation.gis_status == 'not_requested'
-    assert subject._tickets.marked == [('17', 'today', 12, f'Подключили\nhttps://photos.example/{operation.photos[0]["key"]}')]
+    assert subject._tickets.marked == [('17', 'today', 12, f'В ТехПортал\nhttps://photos.example/{operation.photos[0]["key"]}')]
     assert subject._gis.reports == []
 
 
@@ -106,7 +106,7 @@ async def test_selected_feature_is_checked_and_sent_to_gis_after_techportal_mark
     actor = Actor(user_id=uuid4(), techportal_user_id='17', channel='pwa')
     feature_id = uuid4()
     operation = await subject.begin(actor, ticket_id=12, day='today', idempotency_key=uuid4(),
-                                    text='Подключили', feature_id=feature_id, technician_name='Монтажник', photos=[])
+                                    techportal_text='ТП', gis_text='GIS', feature_id=feature_id, technician_name='Монтажник', photos=[])
     operation = await subject.mark_techportal(operation.id)
 
     assert gis.feature_ids == [str(feature_id)]
@@ -116,7 +116,22 @@ async def test_selected_feature_is_checked_and_sent_to_gis_after_techportal_mark
     assert metadata['ticket_id'] == 12
     assert metadata['feature_id'] == str(feature_id)
     assert metadata['completion_id'] == str(operation.id)
+    assert metadata['text'] == 'GIS'
+    assert subject._tickets.marked[0][3] == 'ТП'
     assert photos == []
+
+
+@pytest.mark.asyncio
+async def test_photos_allow_empty_techportal_text_and_gis_text_without_object():
+    subject = service()
+    actor = Actor(user_id=uuid4(), techportal_user_id='17', channel='pwa')
+    operation = await subject.begin(actor, ticket_id=12, day='today', idempotency_key=uuid4(),
+                                    techportal_text='', gis_text='', feature_id=None, technician_name='Монтажник',
+                                    photos=[{'name': 'work.jpg', 'content_type': 'image/jpeg', 'content': b'photo'}])
+    operation = await subject.mark_techportal(operation.id)
+
+    assert operation.completion_status == 'completed'
+    assert subject._tickets.marked[0][3].startswith('https://photos.example/')
 
 
 @pytest.mark.asyncio
@@ -124,7 +139,7 @@ async def test_gis_temporary_failure_keeps_confirmed_completion_for_retry():
     subject = service(gis=FakeGis(fail=True))
     actor = Actor(user_id=uuid4(), techportal_user_id='17', channel='pwa')
     operation = await subject.begin(actor, ticket_id=12, day='today', idempotency_key=uuid4(),
-                                    text='Подключили', feature_id=uuid4(), technician_name='Монтажник', photos=[])
+                                    techportal_text='ТП', gis_text='GIS', feature_id=uuid4(), technician_name='Монтажник', photos=[])
     operation = await subject.mark_techportal(operation.id)
 
     assert operation.completion_status == 'completed'
@@ -140,7 +155,7 @@ async def test_existing_gis_receipt_is_used_without_creating_duplicate_report():
     subject = service(gis=gis)
     actor = Actor(user_id=uuid4(), techportal_user_id='17', channel='pwa')
     operation = await subject.begin(actor, ticket_id=12, day='today', idempotency_key=uuid4(),
-                                    text='Подключили', feature_id=uuid4(), technician_name='Монтажник', photos=[])
+                                    techportal_text='ТП', gis_text='GIS', feature_id=uuid4(), technician_name='Монтажник', photos=[])
     operation = await subject.mark_techportal(operation.id)
 
     assert operation.gis_status == 'delivered'
@@ -153,7 +168,7 @@ async def test_reconciliation_confirms_unknown_techportal_write_before_finishing
     subject = service()
     actor = Actor(user_id=uuid4(), techportal_user_id='17', channel='pwa')
     operation = await subject.begin(actor, ticket_id=12, day='today', idempotency_key=uuid4(),
-                                    text='Подключили', feature_id=None, technician_name='Монтажник', photos=[])
+                                    techportal_text='ТП', gis_text='', feature_id=None, technician_name='Монтажник', photos=[])
     await subject._repository.update(operation.id, completion_status='completion_unknown')
 
     operation = await subject.reconcile_techportal(operation.id)
@@ -168,7 +183,7 @@ async def test_reconciliation_without_matching_techportal_comment_requires_revie
     subject._tickets.recorded = False
     actor = Actor(user_id=uuid4(), techportal_user_id='17', channel='pwa')
     operation = await subject.begin(actor, ticket_id=12, day='today', idempotency_key=uuid4(),
-                                    text='Подключили', feature_id=None, technician_name='Монтажник', photos=[])
+                                    techportal_text='ТП', gis_text='', feature_id=None, technician_name='Монтажник', photos=[])
     await subject._repository.update(operation.id, completion_status='completion_unknown')
 
     operation = await subject.reconcile_techportal(operation.id)
