@@ -13,6 +13,15 @@ PWA для разъездных специалистов. Текущая вер�
 Правила ролей, точечных прав и capabilities:
 [`docs/permissions.md`](docs/permissions.md).
 
+Интеграция с Точка GIS (запланирована):
+[архитектура](docs/gis-architecture.md),
+[поэтапный план разработки](docs/gis-implementation-plan.md),
+[описание PR для GIS](docs/gis-pr-tochka-gis.md).
+
+Просмотр прежних фотоотчётов и истории объекта GIS (отдельное расширение карточки):
+[архитектура](docs/gis-object-history-architecture.md),
+[план реализации](docs/gis-object-history-implementation-plan.md).
+
 Событийная обработка платежей (в разработке):
 [план](docs/payment-events-outbox-plan.md),
 [переключение, масштабирование и откат](docs/payment-events-runbook.md),

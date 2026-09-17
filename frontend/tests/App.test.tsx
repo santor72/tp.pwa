@@ -313,6 +313,43 @@ describe('Платёжный терминал', () => {
   })
 })
 
+describe('Карта сети', () => {
+  it('получает карту только через внутренний API и показывает объекты выбранных слоёв', async () => {
+    const mapId = '11111111-1111-4111-8111-111111111111'
+    const layerId = '22222222-2222-4222-8222-222222222222'
+    const featureId = '33333333-3333-4333-8333-333333333333'
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input)
+      if (path === '/api/auth/session') return json(session)
+      if (path === '/api/tickets/today') return json([])
+      if (path === '/api/gis/maps') return json({ rows: [{ id: mapId, name: 'Чехов', created_at: '2026-09-16T09:00:00Z', report: { total: 1 } }] })
+      if (path === `/api/gis/maps/${mapId}/layers`) return json({ rows: [{ id: layerId, name: 'Муфты', position: 1, count: 1, version: 1 }] })
+      if (path === `/api/gis/maps/${mapId}/bounds`) return json({ xmin: 37.1, ymin: 55, xmax: 37.3, ymax: 55.2 })
+      if (path.startsWith(`/api/gis/maps/${mapId}/features?bbox=`)) return json({ type: 'FeatureCollection', truncated: false, limit: 40000, features: [{ type: 'Feature', id: featureId, geometry: { type: 'Point', coordinates: [37.2, 55.1] }, properties: { id: featureId, layer_id: layerId, kind: 'Point', title: 'Муфта 1', iconColor: '#0288d1' } }] })
+      if (path === `/api/gis/features/${featureId}`) return json({ id: featureId, layer_id: layerId, map_id: mapId, layer_name: 'Муфты', title: 'Муфта 1', number: 42, kind: 'Point', description: 'Адрес: Чехов<br>Кол-во подъездов: 2', geometry: { type: 'Point', coordinates: [37.2, 55.1] }, style: {}, version: 3 })
+      throw new Error(`Неожиданный запрос: ${path}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<App />)
+    await screen.findByRole('heading', { name: 'Заявки сегодня' })
+    fireEvent.click(screen.getByRole('button', { name: 'Карта' }))
+    expect(await screen.findByRole('heading', { name: 'Карта сети' })).toBeTruthy()
+    expect(await screen.findByRole('application', { name: 'Карта сети' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Увеличить масштаб' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Уменьшить масштаб' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Показать загруженные объекты' })).toBeTruthy()
+    expect(screen.getByRole('combobox', { name: 'Подложка карты' })).toBeTruthy()
+    const map = screen.getByRole('application', { name: 'Карта сети' })
+    await waitFor(() => expect(map.querySelector('.gis-point')).not.toBeNull())
+    fireEvent.click(map.querySelector('.gis-point')!)
+    expect(await screen.findByText('Муфта 1')).toBeTruthy()
+    expect(await screen.findByRole('dialog', { name: 'Карточка объекта' })).toBeTruthy()
+    expect(await screen.findByText(/Адрес: Чехов/)).toBeTruthy()
+    expect(screen.queryByText(/<br>/)).toBeNull()
+    expect(fetchMock.mock.calls.some(([path]) => String(path).startsWith('https://'))).toBe(false)
+  })
+})
+
 describe('Capabilities', () => {
   it('скрывает настройки, когда messenger_settings отключён', async () => {
     const restrictedSession = { ...session, capabilities: { ...session.capabilities, messenger_settings: false } }

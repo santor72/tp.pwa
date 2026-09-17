@@ -2,6 +2,7 @@ import {
   FormEvent,
   KeyboardEvent,
   PointerEvent as ReactPointerEvent,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -21,13 +22,20 @@ import {
   MessengerLinkCreate,
   Ticket,
   TicketDay,
+  GisFeature,
+  GisFeatureCollection,
+  GisFeatureDetails,
+  GisLayer,
+  GisMap,
 } from './api'
 
 type AppScreen = 'loading' | 'login' | 'app'
-type AppTab = TicketDay | 'payments' | 'settings'
+type AppTab = TicketDay | 'payments' | 'settings' | 'map'
 type PaymentScreen = 'address' | 'product' | 'client' | 'amount' | 'progress' | 'ambiguous' | 'result'
 const SHOW_CLOSED_TICKETS_KEY = 'tp-pwa:show-closed-tickets'
 const TICKETS_SCOPE_KEY = 'tp-pwa:tickets-scope'
+const GIS_SELECTED_MAP_KEY = 'tp-pwa.gis.selected-map'
+const GIS_MAP_VIEW_KEY = 'tp-pwa.gis.map-view'
 
 function errorMessage(error: unknown): string {
   return error instanceof ApiError ? error.message : 'Не удалось связаться с сервером'
@@ -768,6 +776,297 @@ function Tickets({ day, session }: { day: TicketDay; session: Session }) {
   )
 }
 
+type Position = { longitude: number; latitude: number; accuracy: number }
+
+function coordinatePairs(geometry: GisFeature['geometry']): [number, number][] {
+  if (geometry.type === 'Point') return [geometry.coordinates as [number, number]]
+  if (geometry.type === 'LineString') return geometry.coordinates as [number, number][]
+  return (geometry.coordinates as [number, number][][]).flat()
+}
+
+type GisBasemap = 'streets' | 'satellite' | 'none'
+type GisMapView = { longitude: number; latitude: number; zoom: number }
+const GIS_TILE_SIZE = 256
+const GIS_MAX_LATITUDE = 85.05112878
+const GIS_DEFAULT_ZOOM = 14
+
+function mapWorldPoint([longitude, latitude]: [number, number], zoom: number): [number, number] {
+  const size = GIS_TILE_SIZE * 2 ** zoom
+  const safeLatitude = Math.max(-GIS_MAX_LATITUDE, Math.min(GIS_MAX_LATITUDE, latitude))
+  const sin = Math.sin(safeLatitude * Math.PI / 180)
+  return [((longitude + 180) / 360) * size, (0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * size]
+}
+
+function mapCoordinates([x, y]: [number, number], zoom: number): [number, number] {
+  const size = GIS_TILE_SIZE * 2 ** zoom
+  return [x / size * 360 - 180, Math.atan(Math.sinh(Math.PI * (1 - 2 * y / size))) * 180 / Math.PI]
+}
+
+function initialMapView(coordinates: [number, number][]): GisMapView {
+  const longitudes = coordinates.map(point => point[0]); const latitudes = coordinates.map(point => point[1])
+  const longitude = (Math.min(...longitudes) + Math.max(...longitudes)) / 2
+  const latitude = (Math.min(...latitudes) + Math.max(...latitudes)) / 2
+  const span = Math.max(Math.max(...longitudes) - Math.min(...longitudes), Math.max(...latitudes) - Math.min(...latitudes), .003)
+  return { longitude, latitude, zoom: Math.max(8, Math.min(18, Math.floor(Math.log2(300 / span)))) }
+}
+
+function mapViewBounds(view: GisMapView, width: number, height: number): [number, number, number, number] {
+  const center = mapWorldPoint([view.longitude, view.latitude], Math.round(view.zoom))
+  const [west, north] = mapCoordinates([center[0] - width / 2, center[1] - height / 2], Math.round(view.zoom))
+  const [east, south] = mapCoordinates([center[0] + width / 2, center[1] + height / 2], Math.round(view.zoom))
+  return [west, south, east, north]
+}
+
+function basemapTileUrl(basemap: GisBasemap, x: number, y: number, zoom: number): string | null {
+  if (basemap === 'none') return null
+  if (basemap === 'satellite') return `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zoom}/${y}/${x}`
+  return `https://${['a', 'b', 'c'][(x + y) % 3]}.tile.openstreetmap.org/${zoom}/${x}/${y}.png`
+}
+
+function MapCanvas({ data, position, view, onViewChange, onBoundsChange, onSelect, onLocate, locating }: { data: GisFeatureCollection | null; position: Position | null; view: GisMapView; onViewChange: (view: GisMapView) => void; onBoundsChange: (bounds: [number, number, number, number]) => void; onSelect: (feature: GisFeature) => void; onLocate: () => void; locating: boolean }) {
+  const coordinates = data?.features.flatMap(feature => coordinatePairs(feature.geometry)) ?? []
+  const mapRef = useRef<HTMLDivElement>(null)
+  const drag = useRef<{ x: number; y: number; view: GisMapView } | null>(null)
+  const [size, setSize] = useState({ width: 1000, height: 700 })
+  const [basemap, setBasemap] = useState<GisBasemap>('streets')
+  useEffect(() => {
+    const element = mapRef.current
+    if (!element || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(([entry]) => setSize({ width: entry.contentRect.width, height: entry.contentRect.height }))
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+  useEffect(() => { onBoundsChange(mapViewBounds(view, size.width, size.height)) }, [view, size.height, size.width, onBoundsChange])
+  const zoom = Math.round(view.zoom)
+  const center = mapWorldPoint([view.longitude, view.latitude], zoom)
+  const project = (point: [number, number]) => { const world = mapWorldPoint(point, zoom); return [world[0] - center[0] + size.width / 2, world[1] - center[1] + size.height / 2] as const }
+  const path = (feature: GisFeature) => coordinatePairs(feature.geometry).map((point, index) => `${index ? 'L' : 'M'}${project(point).join(' ')}`).join(' ')
+  const visible = (data?.features ?? []).filter(feature => coordinatePairs(feature.geometry).some(point => { const [x, y] = project(point); return x >= -80 && x <= size.width + 80 && y >= -80 && y <= size.height + 80 }))
+  const tiles: { x: number; y: number; left: number; top: number; url: string }[] = []
+  const tileCount = 2 ** zoom
+  for (let y = Math.max(0, Math.floor((center[1] - size.height / 2) / GIS_TILE_SIZE)); y <= Math.min(tileCount - 1, Math.floor((center[1] + size.height / 2) / GIS_TILE_SIZE)); y += 1) for (let sourceX = Math.floor((center[0] - size.width / 2) / GIS_TILE_SIZE); sourceX <= Math.floor((center[0] + size.width / 2) / GIS_TILE_SIZE); sourceX += 1) {
+    const x = (sourceX % tileCount + tileCount) % tileCount; const url = basemapTileUrl(basemap, x, y, zoom)
+    if (url) tiles.push({ x, y, left: sourceX * GIS_TILE_SIZE - center[0] + size.width / 2, top: y * GIS_TILE_SIZE - center[1] + size.height / 2, url })
+  }
+  const setZoom = (delta: number) => onViewChange({ ...view, zoom: Math.max(3, Math.min(19, Math.round(view.zoom) + delta)) })
+  const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!drag.current) return
+    const startCenter = mapWorldPoint([drag.current.view.longitude, drag.current.view.latitude], zoom)
+    const [longitude, latitude] = mapCoordinates([startCenter[0] - event.clientX + drag.current.x, startCenter[1] - event.clientY + drag.current.y], zoom)
+    onViewChange({ ...view, longitude, latitude })
+  }
+  return <div ref={mapRef} className="gis-map-canvas" role="application" aria-label="Карта сети" onPointerDown={event => {
+    // Pointer capture turns a tap on an SVG marker into a click on the map
+    // container on touch devices. Keep object taps for their own handlers.
+    if ((event.target as Element).closest('.gis-point, .gis-line, .gis-polygon')) return
+    drag.current = { x: event.clientX, y: event.clientY, view }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }} onPointerMove={onPointerMove} onPointerUp={() => { drag.current = null }} onPointerCancel={() => { drag.current = null }} onWheel={event => { event.preventDefault(); setZoom(event.deltaY < 0 ? 1 : -1) }}>
+    <div className={`gis-basemap gis-basemap-${basemap}`}>{tiles.map(tile => <img key={`${zoom}-${tile.x}-${tile.y}-${tile.left}`} src={tile.url} alt="" draggable={false} style={{ left: tile.left, top: tile.top }} />)}</div>
+    <svg viewBox={`0 0 ${size.width} ${size.height}`} aria-hidden="true">
+      {visible.filter(feature => feature.geometry.type === 'Polygon').map(feature => <path key={feature.id} d={`${path(feature)} Z`} className="gis-polygon" onClick={() => onSelect(feature)} />)}
+      {visible.filter(feature => feature.geometry.type === 'LineString').map(feature => <path key={feature.id} d={path(feature)} className="gis-line" style={{ stroke: feature.properties.lineColor || '#2563eb' }} onClick={() => onSelect(feature)} />)}
+      {visible.filter(feature => feature.geometry.type === 'Point').map(feature => { const [x, y] = project(feature.geometry.coordinates as [number, number]); return <g key={feature.id} className="gis-point" onClick={() => onSelect(feature)}><circle cx={x} cy={y} r="11" style={{ fill: feature.properties.iconColor || '#0288d1' }} /><circle cx={x} cy={y} r="4" /></g> })}
+      {position && (() => { const [x, y] = project([position.longitude, position.latitude]); return <g className="gis-position"><circle cx={x} cy={y} r="25" /><circle cx={x} cy={y} r="9" /></g> })()}
+    </svg>
+    <div className="gis-map-controls" onPointerDown={event => event.stopPropagation()}>
+      <button type="button" onClick={() => setZoom(1)} aria-label="Увеличить масштаб">+</button>
+      <button type="button" onClick={() => setZoom(-1)} aria-label="Уменьшить масштаб">−</button>
+      <button type="button" onClick={onLocate} disabled={locating} aria-label="Показать моё местоположение" title="Показать моё местоположение">⌖</button>
+      <button type="button" onClick={() => coordinates.length && onViewChange(initialMapView(coordinates))} disabled={!coordinates.length} aria-label="Показать загруженные объекты">⌂</button>
+    </div>
+    <label className="gis-basemap-picker" onPointerDown={event => event.stopPropagation()}><span>Подложка</span><select value={basemap} onChange={event => setBasemap(event.target.value as GisBasemap)} aria-label="Подложка карты"><option value="streets">Схема</option><option value="satellite">Спутник</option><option value="none">Без подложки</option></select></label>
+    {basemap !== 'none' && <small className="gis-attribution">{basemap === 'streets' ? '© OpenStreetMap' : 'Tiles © Esri'}</small>}
+  </div>
+}
+
+function objectGeometryLabel(feature: GisFeatureDetails): string {
+  const points = coordinatePairs(feature.geometry)
+  if (feature.geometry.type === 'Point') return `${points[0][1].toFixed(5)}, ${points[0][0].toFixed(5)}`
+  const radians = (value: number) => value * Math.PI / 180
+  const distance = points.slice(1).reduce((total, point, index) => {
+    const previous = points[index]; const dLatitude = radians(point[1] - previous[1]); const dLongitude = radians(point[0] - previous[0])
+    const a = Math.sin(dLatitude / 2) ** 2 + Math.cos(radians(previous[1])) * Math.cos(radians(point[1])) * Math.sin(dLongitude / 2) ** 2
+    return total + 6_371_000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  }, 0)
+  return `${Math.round(distance).toLocaleString('ru-RU')} м${feature.geometry.type === 'Polygon' ? ' · периметр' : ''}`
+}
+
+function plainGisDescription(value: string): string {
+  // GIS descriptions originate in imported markup. The PWA never inserts that
+  // markup into the DOM: preserve line breaks, then render text only.
+  const source = value
+    .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, '')
+    .replace(/<br\s*\/?\s*>/gi, '\n')
+    .replace(/<\/(?:p|div|li|tr|h[1-6])\s*>/gi, '\n')
+  const element = document.createElement('div')
+  element.innerHTML = source
+  return (element.textContent ?? '').replace(/\n[\t ]*/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
+function GisFeatureCard({ feature, details, loading, error, onClose }: { feature: GisFeature | null; details: GisFeatureDetails | null; loading: boolean; error: string; onClose: () => void }) {
+  if (!feature) return null
+  const detailRows = details ? [
+    ['Тип', details.kind],
+    ['Номер', details.number],
+    [details.geometry.type === 'Point' ? 'Координаты' : 'Длина', objectGeometryLabel(details)],
+    ['Версия', details.version],
+  ].filter(([, value]) => value !== null && value !== undefined && String(value).trim() !== '') : []
+  const description = details ? plainGisDescription(details.description || '') : ''
+  const title = details?.title?.trim() || feature.properties.title?.trim() || (feature.properties.number !== undefined ? `Объект №${feature.properties.number}` : 'Объект сети')
+  const layerName = details?.layer_name?.trim() || 'Объект сети'
+  return <div className="gis-feature-backdrop" onClick={onClose}>
+    <aside className="gis-feature-card" role="dialog" aria-modal="true" aria-label="Карточка объекта" onClick={event => event.stopPropagation()}>
+      <div className="gis-feature-handle" />
+      <header><div><small>{layerName}</small><h2>{title}</h2></div><button type="button" onClick={onClose} aria-label="Закрыть карточку объекта">×</button></header>
+      {loading && <p className="gis-feature-loading">Загружаем карточку объекта…</p>}
+      {error && <p className="error-box">{error}</p>}
+      {details && <>
+        {detailRows.length > 0 && <dl className="gis-feature-details">
+          {detailRows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{String(value)}</dd></div>)}
+        </dl>}
+        {description && <section className="gis-feature-description"><h3>Описание</h3><p>{description}</p></section>}
+      </>}
+    </aside>
+  </div>
+}
+
+function MapScreen() {
+  const [maps, setMaps] = useState<GisMap[]>([])
+  const [current, setCurrent] = useState<GisMap | null>(null)
+  const [layers, setLayers] = useState<GisLayer[]>([])
+  const [selectedLayers, setSelectedLayers] = useState<string[]>([])
+  const [data, setData] = useState<GisFeatureCollection | null>(null)
+  const [selected, setSelected] = useState<GisFeature | null>(null)
+  const [selectedDetails, setSelectedDetails] = useState<GisFeatureDetails | null>(null)
+  const [detailsLoading, setDetailsLoading] = useState(false)
+  const [detailsError, setDetailsError] = useState('')
+  const [position, setPosition] = useState<Position | null>(null)
+  const [fallbackBounds, setFallbackBounds] = useState<[number, number, number, number] | null>(null)
+  const [mapView, setMapView] = useState<GisMapView | null>(null)
+  const [viewportBounds, setViewportBounds] = useState<[number, number, number, number] | null>(null)
+  const [locationNotice, setLocationNotice] = useState('')
+  const [locating, setLocating] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const initialPositionApplied = useRef(false)
+  const savedViewRestored = useRef(false)
+
+  useEffect(() => {
+    let active = true
+    api.gisMaps().then(result => {
+      if (!active) return
+      setMaps(result.rows)
+      let savedId = ''
+      try { savedId = window.localStorage.getItem(GIS_SELECTED_MAP_KEY) || '' } catch { /* storage may be unavailable */ }
+      setCurrent(result.rows.find(map => map.id === savedId) ?? result.rows[0] ?? null)
+    }).catch(cause => active && setError(errorMessage(cause))).finally(() => active && setLoading(false))
+    return () => { active = false }
+  }, [])
+  useEffect(() => {
+    if (!current) return
+    try { window.localStorage.setItem(GIS_SELECTED_MAP_KEY, current.id) } catch { /* storage may be unavailable */ }
+  }, [current?.id])
+  useEffect(() => {
+    if (!current) return
+    let active = true
+    setLoading(true); setError(''); setData(null); setSelected(null); setSelectedDetails(null); setFallbackBounds(null); setMapView(null); setViewportBounds(null)
+    initialPositionApplied.current = false
+    savedViewRestored.current = false
+    try {
+      const saved = window.sessionStorage.getItem(`${GIS_MAP_VIEW_KEY}:${current.id}`)
+      if (saved) {
+        const parsed = JSON.parse(saved) as Partial<GisMapView>
+        if (typeof parsed.longitude === 'number' && typeof parsed.latitude === 'number' && typeof parsed.zoom === 'number') {
+          setMapView({ longitude: parsed.longitude, latitude: parsed.latitude, zoom: parsed.zoom })
+          savedViewRestored.current = true
+          initialPositionApplied.current = true
+        }
+      }
+    } catch { /* storage may be unavailable or contain invalid data */ }
+    api.gisLayers(current.id).then(result => { if (active) { setLayers(result.rows); setSelectedLayers(result.rows.map(layer => layer.id)) } }).catch(cause => active && setError(errorMessage(cause))).finally(() => active && setLoading(false))
+    api.gisBounds(current.id).then(result => active && setFallbackBounds([result.xmin, result.ymin, result.xmax, result.ymax])).catch(() => active && setFallbackBounds(null))
+    return () => { active = false }
+  }, [current?.id])
+  useEffect(() => {
+    if (mapView || !current || !fallbackBounds) return
+    // Prefer the installer position. If it is not available, open a useful
+    // neighbourhood around the network centre, never the whole map extent.
+    if (position) setMapView({ longitude: position.longitude, latitude: position.latitude, zoom: GIS_DEFAULT_ZOOM })
+    else setMapView({ longitude: (fallbackBounds[0] + fallbackBounds[2]) / 2, latitude: (fallbackBounds[1] + fallbackBounds[3]) / 2, zoom: 13 })
+  }, [current?.id, fallbackBounds?.join(','), mapView, position?.latitude, position?.longitude])
+  const handleViewChange = useCallback((nextView: GisMapView) => {
+    setMapView(nextView)
+    if (current) {
+      try { window.sessionStorage.setItem(`${GIS_MAP_VIEW_KEY}:${current.id}`, JSON.stringify(nextView)) } catch { /* storage may be unavailable */ }
+    }
+  }, [current?.id])
+  const updateViewportBounds = useCallback((bounds: [number, number, number, number]) => {
+    setViewportBounds(previous => previous?.every((value, index) => Math.abs(value - bounds[index]) < .000001) ? previous : bounds)
+  }, [])
+  useEffect(() => {
+    if (!current || !selectedLayers.length || !viewportBounds) return
+    let active = true
+    const timer = window.setTimeout(() => api.gisFeatures(current.id, viewportBounds, selectedLayers).then(result => active && setData(result)).catch(cause => active && setError(errorMessage(cause))), 250)
+    return () => { active = false; window.clearTimeout(timer) }
+  }, [current?.id, selectedLayers.join(','), viewportBounds?.join(',')])
+  useEffect(() => {
+    if (!navigator.geolocation) { setLocationNotice('Геолокация не поддерживается устройством'); return }
+    const watch = navigator.geolocation.watchPosition(
+      value => {
+        const nextPosition = { longitude: value.coords.longitude, latitude: value.coords.latitude, accuracy: value.coords.accuracy }
+        setPosition(nextPosition)
+        if (!savedViewRestored.current && !initialPositionApplied.current) {
+          setMapView({ longitude: nextPosition.longitude, latitude: nextPosition.latitude, zoom: GIS_DEFAULT_ZOOM })
+          initialPositionApplied.current = true
+        }
+        setLocationNotice('Ваше местоположение показано синим маркером')
+      },
+      () => setLocationNotice('Местоположение недоступно. Картой можно пользоваться вручную.'),
+      { enableHighAccuracy: true, maximumAge: 30_000, timeout: 12_000 },
+    )
+    return () => navigator.geolocation.clearWatch(watch)
+  }, [])
+  const locate = useCallback(() => {
+    if (!navigator.geolocation) {
+      setLocationNotice('Геолокация не поддерживается устройством')
+      return
+    }
+    setLocating(true)
+    navigator.geolocation.getCurrentPosition(
+      value => {
+        const nextPosition = { longitude: value.coords.longitude, latitude: value.coords.latitude, accuracy: value.coords.accuracy }
+        setPosition(nextPosition)
+        handleViewChange({ longitude: nextPosition.longitude, latitude: nextPosition.latitude, zoom: GIS_DEFAULT_ZOOM })
+        setLocationNotice('Карта центрирована на вашем местоположении')
+        setLocating(false)
+      },
+      () => {
+        setLocationNotice('Местоположение недоступно. Картой можно пользоваться вручную.')
+        setLocating(false)
+      },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 12_000 },
+    )
+  }, [handleViewChange])
+  const toggleLayer = (layerId: string) => setSelectedLayers(currentLayers => currentLayers.includes(layerId) ? currentLayers.filter(value => value !== layerId) : [...currentLayers, layerId])
+  const openFeature = (feature: GisFeature) => {
+    setSelected(feature); setSelectedDetails(null); setDetailsError(''); setDetailsLoading(true)
+    api.gisFeature(feature.id).then(setSelectedDetails).catch(cause => setDetailsError(errorMessage(cause))).finally(() => setDetailsLoading(false))
+  }
+  const closeFeature = () => { setSelected(null); setSelectedDetails(null); setDetailsError('') }
+  return <section className="map-screen">
+    <div className="step-heading"><h1>Карта сети</h1><p>{locationNotice || 'Определяем местоположение…'}</p></div>
+    {error && <ErrorBox text={error} />}
+    {loading && <div className="panel empty-state">Загрузка карты…</div>}
+    {!loading && maps.length === 0 && <div className="panel empty-state">Нет доступных карт</div>}
+    {maps.length > 1 && <label className="field"><span>Карта</span><select value={current?.id ?? ''} onChange={event => setCurrent(maps.find(map => map.id === event.target.value) ?? null)}>{maps.map(map => <option key={map.id} value={map.id}>{map.name}</option>)}</select></label>}
+    {layers.length > 0 && <details className="gis-layers-panel"><summary>Слои <span>{selectedLayers.length} из {layers.length}</span></summary><div className="gis-layers">{layers.map(layer => <label key={layer.id}><input type="checkbox" checked={selectedLayers.includes(layer.id)} onChange={() => toggleLayer(layer.id)} />{layer.name}</label>)}</div></details>}
+    {mapView && <MapCanvas data={data} position={position} view={mapView} onViewChange={handleViewChange} onBoundsChange={updateViewportBounds} onSelect={openFeature} onLocate={locate} locating={locating} />}
+    {data?.truncated && <div className="error-box">Показана не вся сеть. Уточните область на карте.</div>}
+    <GisFeatureCard feature={selected} details={selectedDetails} loading={detailsLoading} error={detailsError} onClose={closeFeature} />
+  </section>
+}
+
 function AppShell({ session, onLogout }: { session: Session; onLogout: () => void }) {
   const [tab, setTab] = useState<AppTab>('today')
   const paymentsAllowed = session.capabilities.payments
@@ -783,10 +1082,13 @@ function AppShell({ session, onLogout }: { session: Session; onLogout: () => voi
         ? <Settings session={session} />
         : tab === 'payments' && paymentsAllowed
         ? <Payments session={session} />
+        : tab === 'map'
+        ? <MapScreen />
         : <Tickets key={ticketDay} day={ticketDay} session={session} />}
       <nav className="bottom-nav" aria-label="Основные разделы">
         <button className={tab === 'today' ? 'active' : ''} onClick={() => setTab('today')} aria-label="Сегодня" title="Сегодня"><span aria-hidden="true">●</span></button>
         <button className={tab === 'tomorrow' ? 'active' : ''} onClick={() => setTab('tomorrow')} aria-label="Завтра" title="Завтра"><span aria-hidden="true">◐</span></button>
+        <button className={tab === 'map' ? 'active' : ''} onClick={() => setTab('map')} aria-label="Карта" title="Карта"><span aria-hidden="true">⌖</span></button>
         {paymentsAllowed && <button className={tab === 'payments' ? 'active' : ''} onClick={() => setTab('payments')} aria-label="Оплата" title="Оплата"><span aria-hidden="true">₽</span></button>}
         {messengerSettingsAllowed && <button className={tab === 'settings' ? 'active' : ''} onClick={() => setTab('settings')} aria-label="Настройки" title="Настройки"><span aria-hidden="true">⚙</span></button>}
       </nav>

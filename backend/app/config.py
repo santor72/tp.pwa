@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     tp_api_timeout_seconds: float = Field(default=20.0, gt=0)
     tp_tickets_max_pages: int = Field(default=100, gt=0)
     tp_users_cache_ttl_seconds: int = Field(default=300, gt=0)
+    gis_base_url: str = ''
+    gis_api_token: SecretStr = SecretStr('')
+    gis_timeout_seconds: float = Field(default=20.0, gt=0, le=120)
 
     redis_host: str = "redis"
     redis_port: int = 6379
@@ -113,6 +116,16 @@ class Settings(BaseSettings):
             value = f"https://{value}"
         if value and urlsplit(value).scheme not in {"http", "https"}:
             raise ValueError("ESB_BASE_URL должен использовать http:// или https://")
+        return value
+
+    @field_validator('gis_base_url')
+    @classmethod
+    def normalize_gis_base_url(cls, value: str) -> str:
+        value = value.strip().rstrip('/')
+        if value and '://' not in value:
+            value = f'https://{value}'
+        if value and urlsplit(value).scheme not in {'http', 'https'}:
+            raise ValueError('GIS_BASE_URL должен использовать http:// или https://')
         return value
 
     @field_validator("bx24_webhook")

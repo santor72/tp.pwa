@@ -77,6 +77,11 @@ export type MessengerLinkCreate = {
   deep_link: string
   expires_at: string
 }
+export type GisMap = { id: string; name: string; created_at: string; report: { total: number } }
+export type GisLayer = { id: string; name: string; position: number; count: number; version: number }
+export type GisFeature = { type: 'Feature'; id: string; geometry: { type: 'Point' | 'LineString' | 'Polygon'; coordinates: unknown }; properties: { id: string; layer_id: string; title?: string; number?: number; kind: string; iconColor?: string; lineColor?: string; fillColor?: string } }
+export type GisFeatureCollection = { type: 'FeatureCollection'; truncated: boolean; limit: number; features: GisFeature[] }
+export type GisFeatureDetails = { id: string; layer_id: string; map_id: string; layer_name: string; title: string; number: number; kind: string; description: string; geometry: GisFeature['geometry']; style: Record<string, unknown>; version: number }
 
 export class ApiError extends Error {
   constructor(public readonly status: number, public readonly code: string, message: string) {
@@ -152,4 +157,9 @@ export const api = {
   revokeTelegramLink: (csrfToken: string) => request<void>('/api/messenger-links/telegram', {
     method: 'DELETE', headers: { 'X-CSRF-Token': csrfToken },
   }),
+  gisMaps: () => request<{ rows: GisMap[] }>('/api/gis/maps'),
+  gisLayers: (mapId: string) => request<{ rows: GisLayer[] }>(`/api/gis/maps/${mapId}/layers`),
+  gisBounds: (mapId: string) => request<{ xmin: number; ymin: number; xmax: number; ymax: number }>(`/api/gis/maps/${mapId}/bounds`),
+  gisFeatures: (mapId: string, bbox: [number, number, number, number], layers: string[]) => request<GisFeatureCollection>(`/api/gis/maps/${mapId}/features?bbox=${bbox.join(',')}${layers.length ? `&layers=${encodeURIComponent(layers.join(','))}` : ''}`),
+  gisFeature: (featureId: string) => request<GisFeatureDetails>(`/api/gis/features/${featureId}`),
 }

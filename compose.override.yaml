@@ -1,0 +1,16 @@
+# Optional local integration topology.  Start `tochka-gis/current` first; it
+# creates the external `tochka-gis-local_default` network and the `gis` service.
+services:
+  api:
+    environment:
+      GIS_BASE_URL: http://localhost:18770
+    extra_hosts:
+      - "localhost:192.168.24.38"
+    networks:
+      - default
+      - gis-local
+
+networks:
+  gis-local:
+    name: tochka-gis-local_default
+    external: true

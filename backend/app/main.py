@@ -31,6 +31,7 @@ from app.services import create_application_services
 from app.routers.messengers import router as messengers_router
 from app.routers.payments import router as payments_router
 from app.routers.payment_timings import router as payment_timings_router
+from app.routers.gis import router as gis_router
 from app.payment_telemetry import Trace, current_trace, span
 from app.payment_runtime_registry import PaymentRuntimeRegistry
 
@@ -55,6 +56,7 @@ async def lifespan(app: FastAPI):
     app.state.payment_status = app.state.services.payment_status
     app.state.ticket_service = app.state.services.ticket_service
     app.state.messenger_links = app.state.services.messenger_links
+    app.state.gis_client = app.state.services.gis_client
     registry = PaymentRuntimeRegistry(app.state.services.sessions, settings.payment_processing_mode)
     app.state.payment_runtime_registry = registry
     owner = 'api:' + uuid.uuid4().hex
@@ -79,6 +81,7 @@ app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
 app.include_router(messengers_router)
 app.include_router(payments_router)
 app.include_router(payment_timings_router)
+app.include_router(gis_router)
 
 
 @app.middleware("http")

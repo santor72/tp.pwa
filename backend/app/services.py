@@ -20,6 +20,7 @@ from app.messenger_links import MessengerLinkService
 from app.repositories import PaymentRepository, SqlAlchemyMessengerRepository
 from app.techportal_client import TechPortalClient
 from app.tickets import TicketService
+from app.gis_client import GisClient
 
 
 @dataclass(slots=True)
@@ -35,9 +36,11 @@ class ApplicationServices:
     payment_status: PaymentStatusHandler
     bitrix: Bitrix24Client
     messenger_links: MessengerLinkService
+    gis_client: GisClient
 
     async def close(self) -> None:
         await self.bitrix.close()
+        await self.gis_client.close()
         await self.engine.dispose()
 
 
@@ -63,4 +66,5 @@ def create_application_services(settings: Settings, cache_redis: Redis) -> Appli
         payment_status=PaymentStatusHandler(settings, payment_repository, bitrix),
         bitrix=bitrix,
         messenger_links=MessengerLinkService(sessions, settings.tg_link_token_ttl_seconds, SqlAlchemyMessengerRepository()),
+        gis_client=GisClient(settings),
     )
