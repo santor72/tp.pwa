@@ -26,6 +26,12 @@ def configured() -> Settings:
     )
 
 
+def test_storage_uses_path_style_for_internal_seaweedfs_endpoint():
+    client = ObjectStorage(configured())._s3()
+
+    assert client.meta.config.s3['addressing_style'] == 'path'
+
+
 @pytest.mark.asyncio
 async def test_storage_keeps_private_s3_key_and_returns_configured_public_url():
     storage = ObjectStorage(configured())

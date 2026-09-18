@@ -30,6 +30,8 @@ services:
     mem_limit: 384m
   postgres:
     restart: unless-stopped
+  seaweedfs:
+    restart: unless-stopped
   vector:
     restart: unless-stopped
     mem_limit: 256m

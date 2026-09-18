@@ -58,6 +58,13 @@ Frontend и API работают на одном origin. В Docker Compose па�
 cookie отключён только для локального HTTP. В production он должен быть включён
 и приложение должно работать за HTTPS.
 
+Для фотоотчётов заполните `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`,
+`S3_BUCKET` и `S3_PUBLIC_BASE_URL`. Compose запускает SeaweedFS, создаёт bucket
+из `S3_BUCKET` и открывает его S3 API только на `127.0.0.1:8333` (порт можно
+изменить через `SEAWEEDFS_S3_PORT`). Внешний nginx должен проксировать этот
+порт на HTTPS-домен из `S3_PUBLIC_BASE_URL`; URL должен включать bucket, например
+`https://s2.svc.point.online/techportal-reports`.
+
 ## Production
 
 Создайте production override и укажите в нём публичный HTTPS origin:
@@ -96,6 +103,8 @@ curl http://127.0.0.1:8081/health/ready
 - `telegram-bot` — единственный aiogram long-polling процесс без публичного порта;
 - `payment-worker` — продолжение платёжных операций и резервная проверка статуса;
 - `postgres` — пользователи, привязки мессенджеров и платёжные транзакции;
+- `seaweedfs` — S3-совместимое хранилище фотоотчётов с постоянным Docker volume;
+- `seaweedfs-init` — одноразово создаёт bucket, заданный в `S3_BUCKET`;
 - `migrate` — одноразово выполняет Alembic-миграции до запуска API и бота;
 - `redis` — DB 0 для сессий, DB 1 для кэша, DB 2 для Telegram FSM/access;
 - `vector` — читает Docker logs и выводит JSON в console sink.

@@ -29,7 +29,8 @@ class ObjectStorage:
                 aws_secret_access_key=self._settings.s3_secret_access_key.get_secret_value(),
                 region_name=self._settings.s3_region,
                 config=Config(signature_version='s3v4', connect_timeout=self._settings.s3_timeout_seconds,
-                              read_timeout=self._settings.s3_timeout_seconds, retries={'max_attempts': 1}),
+                              read_timeout=self._settings.s3_timeout_seconds, retries={'max_attempts': 1},
+                              s3={'addressing_style': 'path'}),
             )
         return self._client
 
