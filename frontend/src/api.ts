@@ -5,6 +5,7 @@ export type UserProfile = {
   id: number | string
   email: string
   first_name: string | null
+  last_name: string | null
   status: string | null
   role: UserRole
   user_permissions: Record<string, unknown>

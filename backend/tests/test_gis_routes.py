@@ -34,7 +34,7 @@ def test_map_report_uses_server_author_and_reserved_ticket_id():
     app.state.gis_client = gis
     app.include_router(router)
     session = SessionData(
-        user=UserProfile(id=17, email='tech@example.test', first_name='Монтажник', status='active'),
+        user=UserProfile(id=17, email='tech@example.test', first_name='Иван', last_name='Иванов', status='active'),
         csrf_token='csrf',
         created_at=datetime.now(UTC),
         absolute_expires_at=datetime.now(UTC) + timedelta(hours=1),
@@ -58,7 +58,7 @@ def test_map_report_uses_server_author_and_reserved_ticket_id():
         'ticket_id': 1,
         'completion_id': str(completion_id),
         'feature_id': str(feature_id),
-        'technician': {'id': '17', 'name': 'Монтажник'},
+        'technician': {'id': '17', 'name': 'Иван', 'last_name': 'Иванов'},
         'occurred_at': gis.metadata['occurred_at'],
         'text': 'Проверили линию',
     }

@@ -24,6 +24,7 @@ async def test_authenticate_extracts_user_permissions(monkeypatch: pytest.Monkey
                 "id": 7,
                 "email": "tech@example.test",
                 "firstName": "Техник",
+                "lastName": "Иванов",
                 "status": "active",
                 "properties": {"permissions": permissions},
             },
@@ -43,6 +44,7 @@ async def test_authenticate_extracts_user_permissions(monkeypatch: pytest.Monkey
     ).authenticate("tech@example.test", "password")
 
     assert authenticated.user.user_permissions == permissions
+    assert authenticated.user.last_name == "Иванов"
     assert authenticated.cookies == {"tp-session": "employee-session"}
 
 

@@ -89,13 +89,13 @@ async def test_connection_completion_adds_s3_links_to_techportal_comment_without
     subject = service()
     actor = Actor(user_id=uuid4(), techportal_user_id='17', channel='pwa')
     operation = await subject.begin(actor, ticket_id=12, day='today', idempotency_key=uuid4(),
-                                    techportal_text='  В ТехПортал  ', gis_text='В GIS', feature_id=None, technician_name='Монтажник',
+                                    techportal_text='  В ТехПортал  ', gis_text='В GIS', feature_id=None, technician_name='Иван', technician_last_name='Иванов',
                                     photos=[{'name': 'work.jpg', 'content_type': 'image/jpeg', 'content': b'photo'}])
     operation = await subject.mark_techportal(operation.id)
 
     assert operation.completion_status == 'completed'
     assert operation.gis_status == 'not_requested'
-    assert subject._tickets.marked == [('17', 'today', 12, f'В ТехПортал\nhttps://photos.example/{operation.photos[0]["key"]}')]
+    assert subject._tickets.marked == [('17', 'today', 12, f'Иван Иванов\nВ ТехПортал\nhttps://photos.example/{operation.photos[0]["key"]}')]
     assert subject._gis.reports == []
 
 
@@ -117,7 +117,8 @@ async def test_selected_feature_is_checked_and_sent_to_gis_after_techportal_mark
     assert metadata['feature_id'] == str(feature_id)
     assert metadata['completion_id'] == str(operation.id)
     assert metadata['text'] == 'GIS'
-    assert subject._tickets.marked[0][3] == 'ТП'
+    assert metadata['technician'] == {'id': '17', 'name': 'Монтажник', 'last_name': ''}
+    assert subject._tickets.marked[0][3] == 'Монтажник\nТП'
     assert photos == []
 
 
@@ -131,7 +132,7 @@ async def test_photos_allow_empty_techportal_text_and_gis_text_without_object():
     operation = await subject.mark_techportal(operation.id)
 
     assert operation.completion_status == 'completed'
-    assert subject._tickets.marked[0][3].startswith('https://photos.example/')
+    assert subject._tickets.marked[0][3].startswith('Монтажник\nhttps://photos.example/')
 
 
 @pytest.mark.asyncio

@@ -39,7 +39,7 @@ def test_connection_completion_requires_csrf_and_passes_server_context():
     app.add_exception_handler(ApiError, api_error)
     app.include_router(router)
     session = SessionData(
-        user=UserProfile(id=17, email='tech@example.test', first_name='Монтажник', status='active'),
+        user=UserProfile(id=17, email='tech@example.test', first_name='Иван', last_name='Иванов', status='active'),
         internal_user_id=uuid4(), csrf_token='csrf', created_at=datetime.now(UTC),
         absolute_expires_at=datetime.now(UTC) + timedelta(hours=1),
     )
@@ -58,7 +58,7 @@ def test_connection_completion_requires_csrf_and_passes_server_context():
     assert actor.techportal_user_id == '17'
     assert values == {
         'ticket_id': 32412, 'day': 'today', 'idempotency_key': key, 'techportal_text': 'Подключили', 'gis_text': '',
-        'feature_id': None, 'photos': [], 'technician_name': 'Монтажник',
+        'feature_id': None, 'photos': [], 'technician_name': 'Иван', 'technician_last_name': 'Иванов',
     }
 
 

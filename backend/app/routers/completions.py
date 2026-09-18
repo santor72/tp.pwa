@@ -50,10 +50,11 @@ async def complete_connection(
     _, session = session_pair
     actor = await actor_from_session(request, session)
     technician_name = (session.user.first_name or session.user.email).strip() or str(session.user.id)
+    technician_last_name = (session.user.last_name or '').strip()
     operation = await request.app.state.connection_completion_service.begin(
         actor, ticket_id=ticket_id, day=day, idempotency_key=idempotency_key,
         techportal_text=techportal_report_text, gis_text=gis_report_text, feature_id=feature_id,
-        photos=payload_photos, technician_name=technician_name,
+        photos=payload_photos, technician_name=technician_name, technician_last_name=technician_last_name,
     )
     operation = await request.app.state.connection_completion_service.mark_techportal(operation.id)
     return response(operation)

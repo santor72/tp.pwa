@@ -27,6 +27,7 @@ class UserProfile(BaseModel):
     id: int | str
     email: str
     first_name: str | None = None
+    last_name: str | None = None
     status: str | None = None
     user_permissions: dict[str, Any] = Field(default_factory=dict)
 

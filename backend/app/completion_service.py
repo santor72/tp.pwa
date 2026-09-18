@@ -20,7 +20,7 @@ class ConnectionCompletionService:
 
     async def begin(self, actor: Actor, *, ticket_id: int, day: str, idempotency_key: UUID,
                     techportal_text: str, gis_text: str, feature_id: UUID | None,
-                    photos: list[dict[str, Any]], technician_name: str) -> Any:
+                    photos: list[dict[str, Any]], technician_name: str, technician_last_name: str = '') -> Any:
         await self._tickets.assert_connection_assigned(actor.techportal_user_id, day, ticket_id)
         if not techportal_text and not photos:
             raise ApiError(422, 'CONNECTION_REPORT_REQUIRED', 'Добавьте текст для ТехПортала или фотографию')
@@ -30,6 +30,7 @@ class ConnectionCompletionService:
         operation, created = await self._repository.create_or_get(
             idempotency_key=idempotency_key, ticket_id=ticket_id, day=day, user_id=actor.user_id,
             technician_external_id=actor.techportal_user_id, technician_name=technician_name,
+            technician_last_name=technician_last_name,
             feature_id=feature_id, feature_snapshot=feature_snapshot, external_report_id=uuid4() if feature_id else None,
             techportal_text=techportal_text, gis_text=gis_text, photos=[], completion_status='prepared',
             gis_status='not_ready' if feature_id else 'not_requested',
@@ -52,7 +53,7 @@ class ConnectionCompletionService:
             await self._repository.update(operation.id, completion_status='completion_failed',
                                           last_error_code=exc.code, last_error_message=exc.message)
             raise
-        comment = self._comment(techportal_text, uploaded)
+        comment = self._comment(technician_name, technician_last_name, techportal_text, uploaded)
         return await self._repository.update(operation.id, photos=uploaded, techportal_comment=comment, completion_status='marking')
 
     async def mark_techportal(self, operation_id: UUID) -> Any:
@@ -123,7 +124,11 @@ class ConnectionCompletionService:
             receipt = await self._gis.create_report({
                 'external_report_id': str(operation.external_report_id), 'ticket_id': operation.ticket_id,
                 'completion_id': str(operation.id), 'feature_id': str(operation.feature_id),
-                'technician': {'id': operation.technician_external_id, 'name': operation.technician_name},
+                'technician': {
+                    'id': operation.technician_external_id,
+                    'name': operation.technician_name,
+                    'last_name': operation.technician_last_name,
+                },
                 'occurred_at': operation.created_at.astimezone(UTC).isoformat().replace('+00:00', 'Z'),
                 'text': operation.gis_text,
             }, photos)
@@ -147,5 +152,6 @@ class ConnectionCompletionService:
                                              next_attempt_at=None, lease_until=None, last_error_code=None, last_error_message=None)
 
     @staticmethod
-    def _comment(text: str, photos: list[dict[str, Any]]) -> str:
-        return '\n'.join(part for part in [text.strip(), *(photo['public_url'] for photo in photos)] if part).strip()
+    def _comment(first_name: str, last_name: str, text: str, photos: list[dict[str, Any]]) -> str:
+        technician = ' '.join(part for part in [first_name.strip(), last_name.strip()] if part)
+        return '\n'.join(part for part in [technician, text.strip(), *(photo['public_url'] for photo in photos)] if part).strip()

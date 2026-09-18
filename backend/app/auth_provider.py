@@ -58,6 +58,7 @@ class TechPortalAuthProvider:
                     id=payload["id"],
                     email=payload["email"],
                     first_name=payload.get("firstName"),
+                    last_name=payload.get("lastName"),
                     status=payload.get("status"),
                     user_permissions=permissions if isinstance(permissions, dict) else {},
                 ),

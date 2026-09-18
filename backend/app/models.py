@@ -271,6 +271,7 @@ class ConnectionCompletionOperation(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='RESTRICT'), nullable=False)
     technician_external_id: Mapped[str] = mapped_column(String(128), nullable=False)
     technician_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    technician_last_name: Mapped[str] = mapped_column(String(255), nullable=False, default='')
     feature_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     feature_snapshot: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     external_report_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), unique=True)

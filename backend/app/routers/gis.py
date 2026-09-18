@@ -64,12 +64,13 @@ async def create_report(
         payload_photos.append((photo.filename or f'{uuid4()}.jpg', content, photo.content_type))
     session = session_pair[1]
     technician_name = (session.user.first_name or session.user.email).strip() or str(session.user.id)
+    technician_last_name = (session.user.last_name or '').strip()
     metadata = {
         'external_report_id': str(external_report_id),
         'ticket_id': 1,
         'completion_id': str(completion_id),
         'feature_id': str(feature_id),
-        'technician': {'id': str(session.user.id), 'name': technician_name},
+        'technician': {'id': str(session.user.id), 'name': technician_name, 'last_name': technician_last_name},
         'occurred_at': datetime.now(UTC).isoformat().replace('+00:00', 'Z'),
         'text': report_text,
     }
