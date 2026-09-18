@@ -710,9 +710,11 @@ function GisFeaturePicker({ value, onChange }: { value: string; onChange: (value
         {maps.length > 1 && <label className="field"><span>Карта</span><select value={mapId} onChange={event => { setMapId(event.target.value); try { window.localStorage.setItem(GIS_SELECTED_MAP_KEY, event.target.value) } catch { /* storage may be unavailable */ } }}>{maps.map(map => <option key={map.id} value={map.id}>{map.name}</option>)}</select></label>}
         {loading && <p className="gis-feature-loading">Загружаем объекты…</p>}
         {error && <ErrorBox text={error} />}
-        {locationNotice && <p className="gis-map-notice">{locationNotice}</p>}
-        {mapView && <MapCanvas data={data} position={position} view={mapView} onViewChange={handleViewChange} onBoundsChange={updateViewportBounds} onSelect={openFeature} onLocate={locate} locating={locating} />}
-        {data?.truncated && <div className="error-box">Показана не вся сеть. Уточните область на карте.</div>}
+        {!selected && <>
+          {locationNotice && <p className="gis-map-notice">{locationNotice}</p>}
+          {mapView && <MapCanvas data={data} position={position} view={mapView} onViewChange={handleViewChange} onBoundsChange={updateViewportBounds} onSelect={openFeature} onLocate={locate} locating={locating} />}
+          {data?.truncated && <div className="error-box">Показана не вся сеть. Уточните область на карте.</div>}
+        </>}
         {selected && <section className="gis-picker-selection" aria-label="Подтверждение объекта GIS">
           <header><div><small>{selectedLayer}</small><h3>{details?.title || selectedTitle}</h3></div><button type="button" onClick={() => setSelected(null)} aria-label="Вернуться к карте">×</button></header>
           {detailsLoading && <p className="gis-feature-loading">Загружаем карточку объекта…</p>}
