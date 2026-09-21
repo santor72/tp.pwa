@@ -15,9 +15,9 @@ def test_capabilities_combine_role_configuration_and_techportal_permission() -> 
     user = capabilities_for(UserRole.USER, {}, False)
     visible_for_all = capabilities_for(UserRole.USER, {}, True)
 
-    assert admin.model_dump() == {"payments": True, "gis": False, "messenger_settings": True, "all_tickets": True, "payment_admin": True}
-    assert manager.model_dump() == {"payments": False, "gis": False, "messenger_settings": False, "all_tickets": True, "payment_admin": False}
-    assert user.model_dump() == {"payments": False, "gis": False, "messenger_settings": False, "all_tickets": False, "payment_admin": False}
+    assert admin.model_dump() == {"payments": True, "gis": False, "connection_photos": False, "messenger_settings": True, "all_tickets": True, "payment_admin": True}
+    assert manager.model_dump() == {"payments": False, "gis": False, "connection_photos": False, "messenger_settings": False, "all_tickets": True, "payment_admin": False}
+    assert user.model_dump() == {"payments": False, "gis": False, "connection_photos": False, "messenger_settings": False, "all_tickets": False, "payment_admin": False}
     assert visible_for_all.messenger_settings is True
 
 
@@ -27,6 +27,14 @@ def test_gis_capability_uses_the_configured_techportal_statuses() -> None:
 
     assert allowed.gis is True
     assert denied.gis is False
+
+
+def test_connection_photo_capability_requires_full_s3_configuration() -> None:
+    assert Settings().connection_photos_enabled is False
+    assert Settings(
+        s3_endpoint_url='http://seaweedfs:8333', s3_access_key_id='access', s3_secret_access_key='secret',
+        s3_bucket='reports', s3_public_base_url='https://files.example/reports',
+    ).connection_photos_enabled is True
 
 
 def test_gis_backend_access_requires_a_configured_techportal_status() -> None:

@@ -40,6 +40,8 @@ async def complete_connection(
         raise ApiError(422, 'VALIDATION_ERROR', 'Укажите день заявки')
     if len(photos) > 5:
         raise ApiError(422, 'REPORT_PHOTOS_LIMIT', 'В одном отчёте можно загрузить до 5 фотографий')
+    if photos and not settings.connection_photos_enabled:
+        raise ApiError(503, 'S3_NOT_CONFIGURED', 'Загрузка фотографий для заявок не настроена')
     if not techportal_report_text and not photos:
         raise ApiError(422, 'CONNECTION_REPORT_REQUIRED', 'Добавьте текст для ТехПортала или фотографию')
     if feature_id and not gis_report_text and not photos:

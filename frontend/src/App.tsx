@@ -738,6 +738,7 @@ function TicketDetails({
   onDial,
   onCompleteConnection,
   gisAllowed,
+  connectionPhotosAllowed,
 }: {
   ticket: Ticket
   busy: boolean
@@ -748,6 +749,7 @@ function TicketDetails({
   onDial: (phone: string) => void
   onCompleteConnection: (techportalText: string, gisText: string, photos: File[], featureId: string | undefined, idempotencyKey: string) => Promise<ConnectionCompletion>
   gisAllowed: boolean
+  connectionPhotosAllowed: boolean
 }) {
   const [techportalText, setTechportalText] = useState('')
   const [gisText, setGisText] = useState('')
@@ -818,10 +820,10 @@ function TicketDetails({
         </div>
         {editable && needsComment && <Field label="Что выполнено" required><textarea aria-label="Что выполнено" value={techportalText} onChange={event => setTechportalText(event.target.value)} rows={4} placeholder="Опишите выполненные работы" /></Field>}
         {editable && isConnectionReport && <>
-          <Field label="Отчёт для ТехПортала"><textarea aria-label="Отчёт для ТехПортала" value={techportalText} onChange={event => setTechportalText(event.target.value)} rows={3} placeholder="Комментарий о выполненных работах" /></Field>
-          <Field label="Фотографии"><input aria-label="Фотографии выполнения" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" multiple onChange={event => setPhotos(Array.from(event.target.files ?? []))} /></Field>
+          <Field label="Отчёт для ТехПортала" required={!connectionPhotosAllowed}><textarea aria-label="Отчёт для ТехПортала" value={techportalText} onChange={event => setTechportalText(event.target.value)} rows={3} placeholder="Комментарий о выполненных работах" /></Field>
+          {connectionPhotosAllowed && <Field label="Фотографии"><input aria-label="Фотографии выполнения" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" multiple onChange={event => setPhotos(Array.from(event.target.files ?? []))} /></Field>}
           {gisAllowed && <div className="field"><span>Объект GIS — необязательно</span><GisFeaturePicker value={featureId} onChange={setFeatureId} /></div>}
-          {featureId && <Field label="Отчёт для GIS"><textarea aria-label="Отчёт для GIS" value={gisText} onChange={event => setGisText(event.target.value)} rows={3} placeholder="Описание для отчёта GIS" /></Field>}
+          {featureId && <Field label="Отчёт для GIS" required={!connectionPhotosAllowed}><textarea aria-label="Отчёт для GIS" value={gisText} onChange={event => setGisText(event.target.value)} rows={3} placeholder="Описание для отчёта GIS" /></Field>}
           {completionError && <ErrorBox text={completionError} />}
         </>}
         {completionNotice && <div className={completion?.completion_status === 'completed' ? 'success-box' : 'error-box'}>{completionNotice}</div>}
@@ -949,6 +951,7 @@ function Tickets({ day, session }: { day: TicketDay; session: Session }) {
             return completion
           }}
           gisAllowed={session.capabilities.gis}
+          connectionPhotosAllowed={session.capabilities.connection_photos}
         />
       </>
     )

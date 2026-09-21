@@ -17,7 +17,7 @@ const session = {
     },
   },
   csrf_token: 'csrf-test',
-  capabilities: { payments: true, gis: true, messenger_settings: true, all_tickets: false },
+  capabilities: { payments: true, gis: true, connection_photos: true, messenger_settings: true, all_tickets: false },
 }
 
 const ticket = {
@@ -399,6 +399,21 @@ describe('Capabilities', () => {
     expect(screen.queryByRole('button', { name: 'Карта' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /СНТ Волга/ }))
     expect(screen.queryByRole('button', { name: 'Выбрать объект на карте' })).toBeNull()
+  })
+
+  it('скрывает фотографии подключения без S3 capability', async () => {
+    const restrictedSession = { ...session, capabilities: { ...session.capabilities, connection_photos: false } }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/api/auth/session') return json(restrictedSession)
+      if (String(input) === '/api/tickets/today') return json([ticket])
+      throw new Error(`Неожиданный запрос: ${input}`)
+    }))
+
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /СНТ Волга/ }))
+    expect(screen.queryByLabelText('Фотографии выполнения')).toBeNull()
+    expect(screen.getByText('Отчёт для ТехПортала').parentElement?.textContent).toContain('*')
   })
 
   it('скрывает настройки, когда messenger_settings отключён', async () => {

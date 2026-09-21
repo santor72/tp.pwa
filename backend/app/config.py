@@ -118,6 +118,16 @@ class Settings(BaseSettings):
 
     allowed_origins: str = "http://localhost:8080"
 
+    @property
+    def connection_photos_enabled(self) -> bool:
+        return all((
+            self.s3_endpoint_url,
+            self.s3_access_key_id,
+            self.s3_secret_access_key.get_secret_value(),
+            self.s3_bucket,
+            self.s3_public_base_url,
+        ))
+
     @field_validator("esb_base_url")
     @classmethod
     def normalize_esb_base_url(cls, value: str) -> str:

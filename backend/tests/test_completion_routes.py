@@ -84,3 +84,28 @@ def test_connection_completion_rejects_empty_report_before_service():
     assert response.status_code == 422
     assert response.json()['detail'] == 'Добавьте текст для ТехПортала или фотографию'
     assert completion.begin_args is None
+
+
+def test_connection_completion_rejects_photos_when_s3_is_not_configured():
+    app = FastAPI()
+    completion = FakeCompletionService()
+    app.state.connection_completion_service = completion
+    app.add_exception_handler(ApiError, api_error)
+    app.include_router(router)
+    session = SessionData(
+        user=UserProfile(id=17, email='tech@example.test', first_name='Монтажник', status='active'),
+        internal_user_id=uuid4(), csrf_token='csrf', created_at=datetime.now(UTC),
+        absolute_expires_at=datetime.now(UTC) + timedelta(hours=1),
+    )
+
+    async def csrf_override():
+        return 'session', session
+
+    app.dependency_overrides[require_csrf] = csrf_override
+    response = TestClient(app).post('/api/tickets/32412/connection-completion', data={
+        'day': 'today', 'idempotency_key': str(uuid4()), 'techportal_text': 'Подключили',
+    }, files={'photos': ('work.jpg', b'not-validated-when-s3-is-off', 'image/jpeg')})
+
+    assert response.status_code == 503
+    assert response.json()['detail'] == 'Загрузка фотографий для заявок не настроена'
+    assert completion.begin_args is None

@@ -1,5 +1,5 @@
 export type UserRole = 'admin' | 'manager' | 'user'
-export type Capabilities = { payments: boolean; gis: boolean; messenger_settings: boolean; all_tickets: boolean }
+export type Capabilities = { payments: boolean; gis: boolean; connection_photos: boolean; messenger_settings: boolean; all_tickets: boolean }
 
 export type UserProfile = {
   id: number | string
