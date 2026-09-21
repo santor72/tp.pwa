@@ -186,7 +186,7 @@ class PaymentEventRepository:
             details = {'action': action}
             if action == 'select':
                 if tx.status != 'client_selection_required' or selection not in {
-                    (item['entity_type'], int(item['entity_id'])) for item in tx.candidate_snapshot
+                    (item['entity_type'], int(item['entity_id']), item.get('action')) for item in tx.candidate_snapshot
                 }:
                     raise PaymentStateError('Выбранный клиент отсутствует среди кандидатов')
                 tx.status = 'resolving_client'

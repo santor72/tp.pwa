@@ -140,9 +140,12 @@ class PaymentRepository:
             )
             return list(result)
 
-    async def admin_list(self, *, date_from: datetime, date_to: datetime, phone: str | None, employee: str | None, page: int, page_size: int) -> tuple[list[PaymentTransaction], int]:
+    async def admin_list(self, *, date_from: datetime, date_to: datetime, phone: str | None, employee: str | None, paid_only: bool, page: int, page_size: int) -> tuple[list[PaymentTransaction], int]:
         async with self._sessions() as session:
-            filters = [PaymentTransaction.status == "paid", PaymentTransaction.paid_at >= date_from, PaymentTransaction.paid_at < date_to]
+            date_field = PaymentTransaction.paid_at if paid_only else PaymentTransaction.created_at
+            filters = [date_field >= date_from, date_field < date_to]
+            if paid_only:
+                filters.append(PaymentTransaction.status == "paid")
             phone_digits = ''.join(c for c in (phone or '') if c.isdigit())
             if phone_digits:
                 filters.append(PaymentTransaction.phone_normalized.like(f"%{phone_digits}%"))
@@ -150,12 +153,12 @@ class PaymentRepository:
                 pattern = f"%{employee.strip()}%"
                 filters.append(or_(PaymentTransaction.employee_display_name.ilike(pattern), PaymentTransaction.employee_external_id.ilike(pattern)))
             total = int(await session.scalar(select(func.count()).select_from(PaymentTransaction).where(*filters)) or 0)
-            rows = await session.scalars(select(PaymentTransaction).where(*filters).order_by(PaymentTransaction.paid_at.desc(), PaymentTransaction.id.desc()).offset((page - 1) * page_size).limit(page_size))
+            rows = await session.scalars(select(PaymentTransaction).where(*filters).order_by(date_field.desc(), PaymentTransaction.id.desc()).offset((page - 1) * page_size).limit(page_size))
             return list(rows), total
 
     async def admin_get(self, transaction_id: UUID) -> tuple[PaymentTransaction, list[PaymentTransactionEvent]] | None:
         async with self._sessions() as session:
-            transaction = await session.scalar(select(PaymentTransaction).where(PaymentTransaction.id == transaction_id, PaymentTransaction.status == "paid"))
+            transaction = await session.scalar(select(PaymentTransaction).where(PaymentTransaction.id == transaction_id))
             if transaction is None:
                 return None
             events = list(await session.scalars(select(PaymentTransactionEvent).where(PaymentTransactionEvent.transaction_id == transaction_id).order_by(PaymentTransactionEvent.created_at.asc(), PaymentTransactionEvent.id.asc())))

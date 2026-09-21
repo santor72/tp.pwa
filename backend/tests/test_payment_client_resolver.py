@@ -129,7 +129,44 @@ async def test_resolver_searches_exact_address_then_creates_contact() -> None:
     assert ("address", 103, "12А") in bitrix.calls
     assert ("link", 15, 30) in bitrix.calls
     fields = next(call[1] for call in bitrix.calls if call[0] == "create_contact")
-    assert fields["PARENT_ID_1032"] == "103"
+    assert fields["PARENT_ID_1032"] == 103
+    assert fields["ADDRESS"] == "Полный адрес"
+    assert fields["UF_CRM_6797820003612"] == "12А"
+
+
+@pytest.mark.asyncio
+async def test_phone_contact_without_address_is_linked_to_selected_address_lead_and_enriched() -> None:
+    bitrix = FakeBitrix(); bitrix.contacts = [7]; bitrix.address_leads = [{"ID": "15", "TITLE": "Квартира"}]
+    bitrix.contact_records[7] = {"PARENT_ID_1032": None, "ADDRESS": None, "UF_CRM_6797820003612": None}
+    tx = transaction(address_id=4297, address_text="Уездная, 4", apartment="235")
+
+    result = await PaymentClientResolver(Settings(_env_file=None), bitrix).resolve(tx)
+
+    assert (result.contact_id, result.lead_id) == (7, 15)
+    assert ("link", 15, 7) in bitrix.calls
+    assert bitrix.contact_records[7] == {
+        "PARENT_ID_1032": 4297,
+        "ADDRESS": "Уездная, 4",
+        "UF_CRM_6797820003612": "235",
+    }
+
+
+@pytest.mark.asyncio
+async def test_phone_contact_with_other_address_requires_manual_choice() -> None:
+    bitrix = FakeBitrix(); bitrix.contacts = [7]; bitrix.address_leads = [{"ID": "15"}]
+    bitrix.contact_records[7] = {"PARENT_ID_1032": "103", "ADDRESS": "Старый адрес", "UF_CRM_6797820003612": "12"}
+    tx = transaction(address_id=4297, address_text="Уездная, 4", apartment="235")
+    resolver = PaymentClientResolver(Settings(_env_file=None), bitrix)
+
+    with pytest.raises(AmbiguousClient) as caught:
+        await resolver.resolve(tx)
+
+    assert [candidate.action for candidate in caught.value.candidates] == ["keep_contact_address", "apply_selected_address"]
+    tx.candidate_snapshot = [candidate.model_dump() for candidate in caught.value.candidates]
+    result = await resolver.resolve_selected(tx, "contact", 7, "apply_selected_address")
+    assert (result.contact_id, result.lead_id) == (7, 15)
+    assert bitrix.contact_records[7]["PARENT_ID_1032"] == 4297
+    assert bitrix.contact_records[7]["UF_CRM_6797820003612"] == "235"
 
 
 @pytest.mark.asyncio
@@ -191,7 +228,10 @@ async def test_address_match_does_not_duplicate_equivalent_phone(phone) -> None:
     bitrix.lead_records[15] = {"PHONE": [{"VALUE": phone, "VALUE_TYPE": "HOME"}]}
     bitrix.contact_records[3] = {"PHONE": [{"VALUE": phone, "VALUE_TYPE": "HOME"}]}
     await PaymentClientResolver(Settings(), bitrix).resolve(transaction(address_id=103, apartment="12"))
-    assert not any(call[0] in {"update_contact", "update_lead"} for call in bitrix.calls)
+    assert not any(call[0] == "update_lead" for call in bitrix.calls)
+    assert bitrix.contact_records[3]["PHONE"] == [{"VALUE": phone, "VALUE_TYPE": "HOME"}]
+    assert bitrix.contact_records[3]["PARENT_ID_1032"] == 103
+    assert bitrix.contact_records[3]["UF_CRM_6797820003612"] == "12"
 
 
 @pytest.mark.asyncio

@@ -418,7 +418,8 @@ function Payments({ session }: { session: Session }) {
     )
   }
   if (screen === 'ambiguous' && transaction) {
-    return <section className="step-content"><div className="step-heading"><h1>Уточните клиента</h1><p>Найдено несколько совпадений</p></div>{error && <ErrorBox text={error} />}<div className="product-grid">{transaction.candidates.map(candidate => <button className="panel product-card" disabled={loading} key={`${candidate.entity_type}-${candidate.entity_id}`} onClick={() => selectCandidate(candidate)}><strong>{candidate.display_name}</strong><span>{candidate.entity_type === 'contact' ? 'Контакт' : 'Лид'}</span></button>)}</div></section>
+    const addressConflict = transaction.candidates.some(candidate => candidate.matched_by === 'address_conflict')
+    return <section className="step-content"><div className="step-heading"><h1>{addressConflict ? 'Адреса не совпадают' : 'Уточните клиента'}</h1><p>{addressConflict ? 'У контакта уже указан другой адрес. Выберите, какой адрес использовать.' : 'Найдено несколько совпадений'}</p></div>{error && <ErrorBox text={error} />}<div className="product-grid">{transaction.candidates.map(candidate => <button className="panel product-card" disabled={loading} key={`${candidate.entity_type}-${candidate.entity_id}-${candidate.action ?? ''}`} onClick={() => selectCandidate(candidate)}><strong>{candidate.display_name}</strong><span>{candidate.action === 'keep_contact_address' ? 'Оставить адрес в карточке контакта' : candidate.action === 'apply_selected_address' ? 'Записать выбранный адрес' : candidate.entity_type === 'contact' ? 'Контакт' : 'Лид'}</span></button>)}</div></section>
   }
   if (screen === 'result' && transaction) {
     const command = paymentCommands(transaction)

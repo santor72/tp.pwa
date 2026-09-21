@@ -14,7 +14,7 @@ export type UserProfile = {
 export type Session = { user: UserProfile; csrf_token: string; capabilities: Capabilities; payment_telemetry_enabled?: boolean }
 export type PaymentAddress = { locid: number; loctext: string }
 export type PaymentProduct = { product_id: number; title: string; default_amount: string; currency: string; price_override_allowed: boolean }
-export type PaymentCandidate = { entity_type: 'contact' | 'lead'; entity_id: number; display_name: string; phone_hint?: string | null }
+export type PaymentCandidate = { entity_type: 'contact' | 'lead'; entity_id: number; display_name: string; phone_hint?: string | null; matched_by?: 'address' | 'address_conflict' | null; action?: 'keep_contact_address' | 'apply_selected_address' | null }
 export type PaymentStatus = 'draft' | 'resolving_client' | 'client_selection_required' | 'client_resolved' | 'invoice_created' | 'product_added' | 'payment_created' | 'link_created' | 'send_queued' | 'sent' | 'paid' | 'send_failed' | 'failed' | 'expired' | 'canceled'
 export type PaymentAccepted = { id: string; status: PaymentStatus }
 export type PaymentTransaction = PaymentAccepted & {
@@ -147,7 +147,7 @@ export const api = {
   }),
   selectPaymentClient: (id: string, candidate: PaymentCandidate, csrfToken: string) => request<PaymentTransaction>(`/api/payments/${id}/client-selection`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
-    body: JSON.stringify({ entity_type: candidate.entity_type, entity_id: candidate.entity_id }),
+    body: JSON.stringify({ entity_type: candidate.entity_type, entity_id: candidate.entity_id, action: candidate.action }),
   }),
   resendPayment: (id: string, csrfToken: string) => request<PaymentTransaction>(`/api/payments/${id}/resend`, {
     method: 'POST', headers: { 'X-CSRF-Token': csrfToken },

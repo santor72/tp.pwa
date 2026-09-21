@@ -86,13 +86,16 @@ class AdminPaymentEvent(BaseModel):
 
 class AdminPaymentItem(BaseModel):
     id: UUID
-    paid_at: datetime
+    created_at: datetime
+    paid_at: datetime | None = None
     actual_amount: Decimal
     currency: str
     product_title: str
-    status: Literal["paid"]
+    status: str
     phone: str
     email: str | None = None
+    address_text: str | None = None
+    apartment: str | None = None
     employee_display_name: str | None = None
     employee_external_id: str | None = None
     bitrix_lead_id: int | None = None
@@ -105,9 +108,6 @@ class AdminPaymentItem(BaseModel):
 
 class AdminPaymentDetail(AdminPaymentItem):
     catalog_amount: Decimal
-    address_text: str | None = None
-    apartment: str | None = None
-    created_at: datetime
     updated_at: datetime
     events: list[AdminPaymentEvent] = Field(default_factory=list)
 
@@ -214,12 +214,14 @@ class PaymentCandidate(BaseModel):
     entity_id: int
     display_name: str
     phone_hint: str | None = None
-    matched_by: Literal["address"] | None = None
+    matched_by: Literal["address", "address_conflict"] | None = None
+    action: Literal["keep_contact_address", "apply_selected_address"] | None = None
 
 
 class PaymentClientSelectionRequest(BaseModel):
     entity_type: Literal["contact", "lead"]
     entity_id: int = Field(gt=0)
+    action: Literal["keep_contact_address", "apply_selected_address"] | None = None
 
 
 PaymentStatus = Literal[

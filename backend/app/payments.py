@@ -92,9 +92,9 @@ class PaymentService:
         ) for item in rows]
 
     @operation("selection")
-    async def select_client(self, actor: Actor, transaction_id: UUID, entity_type: str, entity_id: int) -> PaymentTransactionResponse:
+    async def select_client(self, actor: Actor, transaction_id: UUID, entity_type: str, entity_id: int, action: str | None = None) -> PaymentTransactionResponse:
         if getattr(self._repository, 'event_queue', None) is not None:
-            transaction = await self._repository.event_queue.queue_command(transaction_id, actor.user_id, 'select', selection=(entity_type, entity_id))
+            transaction = await self._repository.event_queue.queue_command(transaction_id, actor.user_id, 'select', selection=(entity_type, entity_id, action))
             return self.to_response(transaction)
         transaction = await self._owned(actor, transaction_id)
         if current_trace.get() is not None:
@@ -104,7 +104,7 @@ class PaymentService:
         elapsed(transaction.updated_at, "human_wait")
         try:
             with span("resolve_client"):
-                resolved = await self._resolver.resolve_selected(transaction, entity_type, entity_id)
+                resolved = await self._resolver.resolve_selected(transaction, entity_type, entity_id, action)
         except ValueError as exc:
             raise PaymentStateError("Выбранный клиент отсутствует среди кандидатов") from exc
         transaction = await self._repository.update(

@@ -582,12 +582,12 @@ async def test_t20_selection_and_cancel_commands_are_durable_and_owner_checked(e
     await PaymentRepository(sessions).update(tx.id, status='resolving_client')
     await PaymentRepository(sessions).update(tx.id, status='client_selection_required',
         candidate_snapshot=[{'entity_type': 'lead', 'entity_id': 10, 'display_name': 'test'}])
-    result = await repo.queue_command(tx.id, uid, 'select', selection=('lead', 10))
+    result = await repo.queue_command(tx.id, uid, 'select', selection=('lead', 10, None))
     assert result.status == 'resolving_client'
     assert result.candidate_snapshot
     async with sessions() as s:
         jobs = list(await s.scalars(select(PaymentJob).order_by(PaymentJob.generation)))
-        assert jobs[-1].details['selection'] == ['lead', 10]
+        assert jobs[-1].details['selection'] == ['lead', 10, None]
     with pytest.raises(PaymentNotFoundError): await repo.queue_command(tx.id, uuid4(), 'cancel')
     await repo.queue_command(tx.id, uid, 'cancel')
     await repo.queue_command(tx.id, uid, 'cancel')

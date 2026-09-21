@@ -123,7 +123,7 @@ async def test_http_command_durable_execution_and_replay(event_db, monkeypatch, 
                         PaymentJob.kind == 'formation', PaymentJob.state == 'ready')))
                     assert len(queued) == 1
                     if action == 'select':
-                        assert queued[0].details['selection'] == ['contact', 6]
+                        assert queued[0].details['selection'] == ['contact', 6, None]
                 assert (await client.get(f'/api/payments/{tid}')).json()['pending_commands'] == [action]
                 assert (await remote.get('/_control/state')).json() == baseline
                 if paid_before_execution:

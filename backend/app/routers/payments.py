@@ -33,7 +33,7 @@ MOSCOW = ZoneInfo("Europe/Moscow")
 
 
 def _admin_item(row) -> AdminPaymentItem:
-    return AdminPaymentItem(id=row.id, paid_at=row.paid_at, actual_amount=row.actual_amount, currency=row.currency, product_title=row.product_title, status="paid", phone=row.phone_normalized, email=row.email, employee_display_name=row.employee_display_name, employee_external_id=row.employee_external_id, bitrix_lead_id=row.bitrix_lead_id, bitrix_contact_id=row.bitrix_contact_id, bitrix_invoice_id=row.bitrix_invoice_id, bitrix_payment_id=row.bitrix_payment_id, bitrix_payment_account_number=row.bitrix_payment_account_number, bitrix_pay_system_name=row.bitrix_pay_system_name)
+    return AdminPaymentItem(id=row.id, created_at=row.created_at, paid_at=row.paid_at, actual_amount=row.actual_amount, currency=row.currency, product_title=row.product_title, status=row.status, phone=row.phone_normalized, email=row.email, address_text=row.address_text, apartment=row.apartment, employee_display_name=row.employee_display_name, employee_external_id=row.employee_external_id, bitrix_lead_id=row.bitrix_lead_id, bitrix_contact_id=row.bitrix_contact_id, bitrix_invoice_id=row.bitrix_invoice_id, bitrix_payment_id=row.bitrix_payment_id, bitrix_payment_account_number=row.bitrix_payment_account_number, bitrix_pay_system_name=row.bitrix_pay_system_name)
 
 
 def _date_bounds(date_from: str | None, date_to: str | None) -> tuple[datetime, datetime]:
@@ -51,7 +51,7 @@ def _require_payments(actor) -> None:
 
 
 @router.get("/api/admin/payments", response_model=AdminPaymentListResponse)
-async def admin_payments(request: Request, date_from: str | None = None, date_to: str | None = None, phone: str | None = None, employee: str | None = None, page: int = 1, page_size: int = 50, admin=Depends(require_admin)) -> AdminPaymentListResponse:
+async def admin_payments(request: Request, date_from: str | None = None, date_to: str | None = None, phone: str | None = None, employee: str | None = None, paid_only: bool = False, page: int = 1, page_size: int = 50, admin=Depends(require_admin)) -> AdminPaymentListResponse:
     if page < 1 or page_size < 1 or page_size > 100:
         from app.errors import ApiError
         raise ApiError(422, "VALIDATION_ERROR", "Некорректная пагинация")
@@ -61,8 +61,8 @@ async def admin_payments(request: Request, date_from: str | None = None, date_to
         from app.errors import ApiError
         raise ApiError(422, "VALIDATION_ERROR", str(exc)) from exc
     _, _, actor = admin
-    rows, total = await request.app.state.payment_repository.admin_list(date_from=start, date_to=end, phone=phone, employee=employee, page=page, page_size=page_size)
-    audit(logger, "payment.admin.list.viewed", user_id=str(actor.user_id), date_from=date_from, date_to=date_to, page=page, page_size=page_size, count=total)
+    rows, total = await request.app.state.payment_repository.admin_list(date_from=start, date_to=end, phone=phone, employee=employee, paid_only=paid_only, page=page, page_size=page_size)
+    audit(logger, "payment.admin.list.viewed", user_id=str(actor.user_id), date_from=date_from, date_to=date_to, paid_only=paid_only, page=page, page_size=page_size, count=total)
     return AdminPaymentListResponse(items=[_admin_item(row) for row in rows], page=page, page_size=page_size, total=total)
 
 
@@ -72,11 +72,11 @@ async def admin_payment(transaction_id: UUID, request: Request, admin=Depends(re
     result = await request.app.state.payment_repository.admin_get(transaction_id)
     if result is None:
         from app.errors import ApiError
-        raise ApiError(404, "PAYMENT_NOT_FOUND", "Оплаченная операция не найдена")
+        raise ApiError(404, "PAYMENT_NOT_FOUND", "Операция не найдена")
     row, events = result
     audit(logger, "payment.admin.detail.viewed", user_id=str(actor.user_id), transaction_id=str(transaction_id))
     item = _admin_item(row)
-    return AdminPaymentDetail(**item.model_dump(), catalog_amount=row.catalog_amount, address_text=row.address_text, apartment=row.apartment, created_at=row.created_at, updated_at=row.updated_at, events=[AdminPaymentEvent(id=event.id, event_type=event.event_type, created_at=event.created_at, payload=redact(event.safe_payload)) for event in events])
+    return AdminPaymentDetail(**item.model_dump(), catalog_amount=row.catalog_amount, updated_at=row.updated_at, events=[AdminPaymentEvent(id=event.id, event_type=event.event_type, created_at=event.created_at, payload=redact(event.safe_payload)) for event in events])
 
 
 @router.get("/api/payments/addresses", response_model=list[PaymentAddress])
@@ -125,7 +125,7 @@ async def payment(transaction_id: UUID, request: Request, session_pair: tuple[st
 async def select_client(transaction_id: UUID, payload: PaymentClientSelectionRequest, request: Request, session_pair: tuple[str, SessionData] = Depends(require_csrf)) -> PaymentTransactionResponse:
     actor = await actor_from_session(request, session_pair[1])
     _require_payments(actor)
-    response = await request.app.state.payment_service.select_client(actor, transaction_id, payload.entity_type, payload.entity_id)
+    response = await request.app.state.payment_service.select_client(actor, transaction_id, payload.entity_type, payload.entity_id, payload.action)
     audit(logger, "payment.client.selected", user_id=str(actor.user_id), transaction_id=str(transaction_id), entity_type=payload.entity_type, entity_id=payload.entity_id)
     return response
 

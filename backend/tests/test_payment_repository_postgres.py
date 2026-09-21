@@ -137,3 +137,34 @@ async def test_postgres_idempotency_worker_claim_and_expiry(repository) -> None:
     assert await payments.expire_due(now) == 1
     assert (await payments.get(local_due.id)).status == "expired"
     assert (await payments.get(bitrix_due.id)).status == "send_queued"
+
+
+@pytest.mark.asyncio
+async def test_admin_list_includes_unpaid_and_filters_paid_only(repository) -> None:
+    payments, user_id = repository
+    now = datetime.now(UTC)
+    unpaid_values = transaction_values(user_id, now=now)
+    unpaid_values.update(address_text="ул. Тестовая, 1", apartment="235")
+    unpaid, _ = await payments.create_or_get(idempotency_key=uuid4(), values=unpaid_values)
+
+    paid, _ = await payments.create_or_get(
+        idempotency_key=uuid4(), values=transaction_values(user_id, now=now),
+    )
+    await payments.update(paid.id, status="paid", current_step="paid", paid_at=now)
+
+    all_rows, all_total = await payments.admin_list(
+        date_from=now - timedelta(minutes=1), date_to=now + timedelta(minutes=1),
+        phone=None, employee=None, paid_only=False, page=1, page_size=50,
+    )
+    assert all_total == 2
+    assert {row.id for row in all_rows} == {unpaid.id, paid.id}
+    listed_unpaid = next(row for row in all_rows if row.id == unpaid.id)
+    assert listed_unpaid.address_text == "ул. Тестовая, 1"
+    assert listed_unpaid.apartment == "235"
+
+    paid_rows, paid_total = await payments.admin_list(
+        date_from=now - timedelta(minutes=1), date_to=now + timedelta(minutes=1),
+        phone=None, employee=None, paid_only=True, page=1, page_size=50,
+    )
+    assert paid_total == 1
+    assert [row.id for row in paid_rows] == [paid.id]
