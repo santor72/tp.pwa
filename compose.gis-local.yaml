@@ -1,4 +1,4 @@
-# Optional local integration topology.  Start `tochka-gis/current` first; it
+# Optional local integration topology. Start `tochka-gis/current` first; it
 # creates the external `tochka-gis-local_default` network and the `gis` service.
 services:
   api:

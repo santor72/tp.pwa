@@ -54,6 +54,14 @@ PWA для разъездных специалистов. Текущая вер�
 3. Откройте `http://localhost:8081`. Реестр оплат администратора доступен на
    `http://localhost:8082/admin/`.
 
+Для локальной интеграции с GIS сначала запустите GIS, затем явно подключите
+его Compose-конфигурацию:
+
+```bash
+(cd tochka-gis/current && docker compose up -d --build gis)
+docker compose -f compose.yaml -f compose.gis-local.yaml up -d --build
+```
+
 Frontend и API работают на одном origin. В Docker Compose параметр `Secure`
 cookie отключён только для локального HTTP. В production он должен быть включён
 и приложение должно работать за HTTPS.
