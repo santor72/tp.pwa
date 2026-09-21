@@ -10,8 +10,12 @@ from app.cache_store import CacheStore
 from app.config import Settings
 from app.errors import ApiError, RepairCommentRequiredError, TicketNotFoundError
 from app.schemas import (
+    TechPortalBrigade,
     TechPortalTicket,
     TechPortalUser,
+    TicketFilterBrigade,
+    TicketFilterMaster,
+    TicketFiltersResponse,
     TicketComment,
     TicketResponse,
 )
@@ -24,6 +28,8 @@ CONNECTION_TAG = "Новое подключение"
 
 class TicketService:
     users_cache_key = "techportal:users:v1"
+    users_details_cache_key = "techportal:users:details:v1"
+    brigades_cache_key = "techportal:brigades:v1"
 
     def __init__(self, settings: Settings, client: TechPortalClient, cache: CacheStore) -> None:
         self._settings = settings
@@ -55,12 +61,20 @@ class TicketService:
         actor: Actor,
         day: Literal["today", "tomorrow"],
         scope: Literal["assigned", "all"] = "assigned",
+        brigade_ids: list[str] | None = None,
+        master_ids: list[str] | None = None,
     ) -> list[TicketResponse]:
         if scope == "assigned":
             return await self.list_for_day(actor.techportal_user_id, day)
+        resolved_master_ids = await self._resolve_filter_master_ids(brigade_ids, master_ids)
+        if resolved_master_ids is not None and not resolved_master_ids:
+            return []
         offset = 0 if day == "today" else 1
         target = datetime.now(MOSCOW).date() + timedelta(days=offset)
-        tickets = await self._client.tickets(None, target.strftime("%d.%m.%Y"))
+        if resolved_master_ids is None:
+            tickets = await self._client.tickets(None, target.strftime("%d.%m.%Y"))
+        else:
+            tickets = await self._client.tickets(None, target.strftime("%d.%m.%Y"), resolved_master_ids)
         users = await self._user_names()
         normalized = [self._normalize(ticket, users).model_copy(update={"can_change_completion": False}) for ticket in tickets]
         normalized.sort(
@@ -70,6 +84,39 @@ class TicketService:
             )
         )
         return normalized
+
+    async def filters(self) -> TicketFiltersResponse:
+        users = await self._users()
+        brigades = await self._brigades()
+        users_by_id = {str(user.id): user for user in users}
+        brigade_master_ids = {
+            str(master_id)
+            for brigade in brigades
+            for master_id in brigade.master_ids
+        }
+        masters = [
+            TicketFilterMaster(id=str(user.id), name=self._user_name(user))
+            for user in users
+            if str(user.id) in brigade_master_ids
+        ]
+        masters.sort(key=lambda item: item.name.casefold())
+        result_brigades = []
+        for brigade in brigades:
+            master_ids = [str(master_id) for master_id in brigade.master_ids]
+            surnames = [
+                self._user_surname(users_by_id[master_id])
+                for master_id in master_ids
+                if master_id in users_by_id
+            ]
+            if not surnames:
+                continue
+            result_brigades.append(TicketFilterBrigade(
+                id=str(brigade.id),
+                name=", ".join(dict.fromkeys(surnames)),
+                master_ids=master_ids,
+            ))
+        result_brigades.sort(key=lambda item: item.name.casefold())
+        return TicketFiltersResponse(masters=masters, brigades=result_brigades)
 
     async def set_completed(
         self,
@@ -185,7 +232,7 @@ class TicketService:
         cached = await self._cache.get_json(self.users_cache_key)
         if isinstance(cached, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in cached.items()):
             return cached
-        users = await self._client.users()
+        users = await self._users()
         names = {str(user.id): self._user_name(user) for user in users}
         await self._cache.set_json(
             self.users_cache_key,
@@ -193,6 +240,55 @@ class TicketService:
             self._settings.tp_users_cache_ttl_seconds,
         )
         return names
+
+    async def _users(self) -> list[TechPortalUser]:
+        cached = await self._cache.get_json(self.users_details_cache_key)
+        if isinstance(cached, list):
+            try:
+                return [TechPortalUser.model_validate(item) for item in cached]
+            except ValueError:
+                pass
+        users = await self._client.users()
+        await self._cache.set_json(
+            self.users_details_cache_key,
+            [user.model_dump(mode="json") for user in users],
+            self._settings.tp_users_cache_ttl_seconds,
+        )
+        return users
+
+    async def _brigades(self) -> list[TechPortalBrigade]:
+        cached = await self._cache.get_json(self.brigades_cache_key)
+        if isinstance(cached, list):
+            try:
+                return [TechPortalBrigade.model_validate(item) for item in cached]
+            except ValueError:
+                pass
+        brigades = await self._client.brigades()
+        await self._cache.set_json(
+            self.brigades_cache_key,
+            [brigade.model_dump(mode="json") for brigade in brigades],
+            self._settings.tp_users_cache_ttl_seconds,
+        )
+        return brigades
+
+    async def _resolve_filter_master_ids(
+        self,
+        brigade_ids: list[str] | None,
+        master_ids: list[str] | None,
+    ) -> list[str] | None:
+        if not brigade_ids and not master_ids:
+            return None
+        resolved = set(master_ids or [])
+        if brigade_ids:
+            brigades = await self._brigades()
+            requested = set(brigade_ids)
+            resolved.update(
+                str(master_id)
+                for brigade in brigades
+                if str(brigade.id) in requested
+                for master_id in brigade.master_ids
+            )
+        return sorted(resolved)
 
     def _normalize(self, ticket: TechPortalTicket, users: dict[str, str]) -> TicketResponse:
         phones = self._phones(ticket)
@@ -278,6 +374,14 @@ class TicketService:
             return user.name.strip()
         composed = " ".join(part.strip() for part in (user.lastName, user.firstName) if part and part.strip())
         return composed or f"Пользователь #{user.id}"
+
+    @staticmethod
+    def _user_surname(user: TechPortalUser) -> str:
+        if user.lastName and user.lastName.strip():
+            return user.lastName.strip()
+        if user.name and user.name.strip():
+            return user.name.strip().split()[0]
+        return f"Пользователь #{user.id}"
 
     @staticmethod
     def _comment_text(value: Any) -> str:

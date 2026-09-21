@@ -47,6 +47,10 @@ export type PaymentCreatePayload = {
   amount: string
 }
 export type TicketDay = 'today' | 'tomorrow'
+export type TicketFilterMaster = { id: string; name: string }
+export type TicketFilterBrigade = { id: string; name: string; master_ids: string[] }
+export type TicketFilters = { masters: TicketFilterMaster[]; brigades: TicketFilterBrigade[] }
+export type TicketFilterSelection = { brigadeIds: string[]; masterIds: string[] }
 export type TicketComment = {
   created_at: string | null
   author: string
@@ -122,7 +126,15 @@ export const api = {
     method: 'POST',
     headers: { 'X-CSRF-Token': csrfToken },
   }),
-  tickets: (day: TicketDay, scope: 'assigned' | 'all' = 'assigned') => request<Ticket[]>(`/api/tickets/${day}${scope === 'all' ? '?scope=all' : ''}`),
+  tickets: (day: TicketDay, scope: 'assigned' | 'all' = 'assigned', filter: TicketFilterSelection = { brigadeIds: [], masterIds: [] }) => {
+    const query = new URLSearchParams()
+    if (scope === 'all') query.set('scope', 'all')
+    if (scope === 'all' && filter.brigadeIds.length) query.set('brigade_ids', filter.brigadeIds.join(','))
+    if (scope === 'all' && filter.masterIds.length) query.set('master_ids', filter.masterIds.join(','))
+    const suffix = query.toString()
+    return request<Ticket[]>(`/api/tickets/${day}${suffix ? `?${suffix}` : ''}`)
+  },
+  ticketFilters: () => request<TicketFilters>('/api/tickets/filters'),
   setTicketCompletion: (ticketId: number, day: TicketDay, completed: boolean, csrfToken: string, comment?: string) =>
     request<Ticket>(`/api/tickets/${ticketId}/completion`, {
       method: 'POST',

@@ -54,6 +54,31 @@ async def test_all_tickets_omits_master_filter() -> None:
 
 
 @pytest.mark.asyncio
+async def test_all_tickets_passes_explicit_master_filter() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert payload["filters"]["and"][0]["masterIds"] == [87, "112"]
+        return httpx.Response(200, json=[])
+
+    result = await TechPortalClient(settings(), transport=httpx.MockTransport(handler)).tickets(
+        None, "30.07.2026", [87, "112"],
+    )
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_brigades_uses_techportal_directory_endpoint() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url == httpx.URL("https://tp.example/api/v1/techportal-user/brigades")
+        return httpx.Response(200, json=[{"id": 4, "name": "Монтажники", "masterIds": [87, 112]}])
+
+    brigades = await TechPortalClient(settings(), transport=httpx.MockTransport(handler)).brigades()
+    assert brigades[0].id == 4
+    assert brigades[0].master_ids == [87, 112]
+
+
+@pytest.mark.asyncio
 async def test_ticket_list_loads_all_pages_and_deduplicates_tickets() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         page = json.loads(request.content)["page"]

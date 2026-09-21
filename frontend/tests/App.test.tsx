@@ -397,7 +397,7 @@ describe('Capabilities', () => {
 
     await screen.findByRole('heading', { name: 'Заявки сегодня' })
     expect(screen.queryByRole('button', { name: 'Карта' })).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: /СНТ Волга/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /СНТ Волга/ }))
     expect(screen.queryByRole('button', { name: 'Выбрать объект на карте' })).toBeNull()
   })
 
@@ -457,6 +457,40 @@ describe('Capabilities', () => {
     expect(await screen.findByText('Назначены: Иван Иванов, Пётр Петров')).toBeTruthy()
     expect(screen.queryByText('Удерживайте карточку, чтобы изменить статус')).toBeNull()
     expect(localStorage.getItem('tp-pwa:tickets-scope')).toBe('all')
+  })
+
+  it('передаёт выбранную бригаду в серверный фильтр общего списка', async () => {
+    const managerSession = {
+      ...session,
+      user: { ...session.user, role: 'manager' },
+      capabilities: { ...session.capabilities, all_tickets: true },
+    }
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input)
+      if (path === '/api/auth/session') return json(managerSession)
+      if (path === '/api/tickets/today' || path === '/api/tickets/today?scope=all') return json([])
+      if (path === '/api/tickets/filters') return json({
+        masters: [{ id: '87', name: 'Иван Иванов' }],
+        brigades: [{ id: '4', name: 'Монтажники', master_ids: ['87'] }],
+      })
+      if (path === '/api/tickets/today?scope=all&brigade_ids=4') return json([{
+        ...ticket, assigned_masters: ['Иван Иванов'], can_change_completion: false,
+      }])
+      throw new Error(`Неожиданный запрос: ${path}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<App />)
+    fireEvent.click(await screen.findByLabelText('Все заявки'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Фильтр' }))
+    const brigades = await screen.findByLabelText('Бригады')
+    fireEvent.change(brigades, { target: { value: '4' } })
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/tickets/today?scope=all&brigade_ids=4', expect.any(Object))
+    fireEvent.click(screen.getByRole('button', { name: 'Применить' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/tickets/today?scope=all&brigade_ids=4', expect.any(Object)))
+    expect(await screen.findByRole('button', { name: /СНТ Волга/ })).toBeTruthy()
+    expect(localStorage.getItem('tp-pwa:tickets-filter:3')).toContain('4')
   })
 })
 

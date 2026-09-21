@@ -284,6 +284,16 @@ input:focus, textarea:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px #dbea
   width: 1rem;
   height: 1rem;
 }
+.ticket-filters { display: grid; gap: .75rem; margin: .75rem 0; padding: .85rem; }
+.ticket-filters h2 { margin: 0; font-size: 1rem; }
+.ticket-filters p { margin: .2rem 0 0; color: var(--muted); font-size: .84rem; }
+.ticket-filter-controls { display: flex; flex-wrap: wrap; align-items: end; gap: .7rem; }
+.ticket-filter-controls label { display: grid; gap: .3rem; color: #475569; font-size: .82rem; font-weight: 650; }
+.ticket-filter-controls select { min-width: 13rem; min-height: 2.4rem; padding: .35rem; border: 1px solid #cbd5e1; border-radius: .55rem; background: #fff; color: #172033; }
+.ticket-filter-actions, .ticket-filter-summary { display: flex; align-items: center; flex-wrap: wrap; gap: .65rem; }
+.ticket-filter-actions { justify-content: flex-end; }
+.ticket-filter-summary { margin: -.15rem 0 .7rem; }
+.ticket-filter-summary small { color: var(--muted); font-size: .76rem; }
 
 .ticket-masters {
   margin: 0.1rem 0 0;

@@ -22,6 +22,8 @@ import {
   MessengerLinkCreate,
   Ticket,
   TicketDay,
+  TicketFilters,
+  TicketFilterSelection,
   GisFeature,
   GisFeatureCollection,
   GisFeatureDetails,
@@ -36,12 +38,27 @@ type AppTab = TicketDay | 'payments' | 'settings' | 'map'
 type PaymentScreen = 'address' | 'product' | 'client' | 'amount' | 'progress' | 'ambiguous' | 'result'
 const SHOW_CLOSED_TICKETS_KEY = 'tp-pwa:show-closed-tickets'
 const TICKETS_SCOPE_KEY = 'tp-pwa:tickets-scope'
+const TICKETS_FILTER_KEY_PREFIX = 'tp-pwa:tickets-filter:'
 const GIS_SELECTED_MAP_KEY = 'tp-pwa.gis.selected-map'
 const GIS_MAP_VIEW_KEY = 'tp-pwa.gis.map-view'
 const CONNECTION_COMPLETION_KEY_PREFIX = 'tp-pwa:connection-completion:'
 
 function connectionCompletionKey(ticketId: number) {
   return `${CONNECTION_COMPLETION_KEY_PREFIX}${ticketId}`
+}
+
+function ticketFilterKey(userId: string | number) {
+  return `${TICKETS_FILTER_KEY_PREFIX}${userId}`
+}
+
+function storedTicketFilter(userId: string | number): TicketFilterSelection {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(ticketFilterKey(userId)) || '{}')
+    return {
+      brigadeIds: Array.isArray(parsed.brigadeIds) ? parsed.brigadeIds.filter((id: unknown): id is string => typeof id === 'string') : [],
+      masterIds: Array.isArray(parsed.masterIds) ? parsed.masterIds.filter((id: unknown): id is string => typeof id === 'string') : [],
+    }
+  } catch { return { brigadeIds: [], masterIds: [] } }
 }
 
 function errorMessage(error: unknown): string {
@@ -861,6 +878,11 @@ function Tickets({ day, session }: { day: TicketDay; session: Session }) {
     session.capabilities.all_tickets && localStorage.getItem(TICKETS_SCOPE_KEY) === 'all' ? 'all' : 'assigned'
   ))
   const [showClosed, setShowClosed] = useState(() => localStorage.getItem(SHOW_CLOSED_TICKETS_KEY) === 'true')
+  const [filters, setFilters] = useState<TicketFilters | null>(null)
+  const [filterSelection, setFilterSelection] = useState<TicketFilterSelection>(() => storedTicketFilter(session.user.id))
+  const [draftFilterSelection, setDraftFilterSelection] = useState<TicketFilterSelection>(() => storedTicketFilter(session.user.id))
+  const [filterScreen, setFilterScreen] = useState(false)
+  const [filtersError, setFiltersError] = useState('')
   const canViewAll = session.capabilities.all_tickets
 
   useEffect(() => { localStorage.setItem(SHOW_CLOSED_TICKETS_KEY, String(showClosed)) }, [showClosed])
@@ -871,12 +893,31 @@ function Tickets({ day, session }: { day: TicketDay; session: Session }) {
     }
     localStorage.setItem(TICKETS_SCOPE_KEY, scope)
   }, [canViewAll, scope])
+  useEffect(() => { localStorage.setItem(ticketFilterKey(session.user.id), JSON.stringify(filterSelection)) }, [filterSelection, session.user.id])
+
+  useEffect(() => {
+    let active = true
+    if (scope !== 'all') { setFilters(null); setFiltersError(''); setFilterScreen(false); return () => { active = false } }
+    api.ticketFilters()
+      .then(value => {
+        if (!active) return
+        setFilters(value)
+        const brigadeIds = new Set(value.brigades.map(item => item.id))
+        const masterIds = new Set(value.masters.map(item => item.id))
+        setFilterSelection(current => ({
+          brigadeIds: current.brigadeIds.filter(id => brigadeIds.has(id)),
+          masterIds: current.masterIds.filter(id => masterIds.has(id)),
+        }))
+      })
+      .catch(cause => { if (active) setFiltersError(errorMessage(cause)) })
+    return () => { active = false }
+  }, [scope])
 
   async function load() {
     setLoading(true)
     setError('')
     try {
-      setTickets(await api.tickets(day, scope))
+      setTickets(await api.tickets(day, scope, filterSelection))
     } catch (cause) {
       setError(errorMessage(cause))
     } finally {
@@ -888,12 +929,12 @@ function Tickets({ day, session }: { day: TicketDay; session: Session }) {
     let active = true
     setLoading(true)
     setError('')
-    api.tickets(day, scope)
+    api.tickets(day, scope, filterSelection)
       .then(value => { if (active) setTickets(value) })
       .catch(cause => { if (active) setError(errorMessage(cause)) })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [day, scope])
+  }, [day, scope, filterSelection])
 
   async function toggle(ticket: Ticket, comment?: string) {
     if (busyId !== null) return
@@ -957,6 +998,47 @@ function Tickets({ day, session }: { day: TicketDay; session: Session }) {
     )
   }
 
+  const filterSummary = (() => {
+    if (!filterSelection.brigadeIds.length && !filterSelection.masterIds.length) return 'Фильтр не задан'
+    const brigadeNames = filterSelection.brigadeIds.map(id => filters?.brigades.find(item => item.id === id)?.name || id)
+    const masterNames = filterSelection.masterIds.map(id => filters?.masters.find(item => item.id === id)?.name || id)
+    return [
+      brigadeNames.length ? `Бригада: ${brigadeNames.join(', ')}` : '',
+      masterNames.length ? `Мастер: ${masterNames.join(', ')}` : '',
+    ].filter(Boolean).join(' · ')
+  })()
+
+  if (filterScreen) {
+    return <section className="tickets-screen ticket-filter-screen">
+      <div className="tickets-heading">
+        <div><h1>Фильтр заявок</h1><p>Выберите бригаду или мастера</p></div>
+        <button className="icon-button" aria-label="Назад к заявкам" onClick={() => setFilterScreen(false)}><BackIcon /></button>
+      </div>
+      {filtersError && <ErrorBox text={filtersError} />}
+      {!filters && !filtersError && <div className="panel empty-state">Загрузка фильтров…</div>}
+      {filters && <section className="ticket-filters panel">
+        <div className="ticket-filter-controls">
+          <label>Бригады
+            <select aria-label="Бригады" value={draftFilterSelection.brigadeIds[0] || ''} onChange={event => { const value = event.currentTarget.value; setDraftFilterSelection(current => ({ ...current, brigadeIds: value ? [value] : [] })) }}>
+              <option value="">Все бригады</option>
+              {filters.brigades.map(brigade => <option key={brigade.id} value={brigade.id}>{brigade.name}</option>)}
+            </select>
+          </label>
+          <label>Мастера
+            <select aria-label="Мастера" value={draftFilterSelection.masterIds[0] || ''} onChange={event => { const value = event.currentTarget.value; setDraftFilterSelection(current => ({ ...current, masterIds: value ? [value] : [] })) }}>
+              <option value="">Все мастера</option>
+              {filters.masters.map(master => <option key={master.id} value={master.id}>{master.name}</option>)}
+            </select>
+          </label>
+        </div>
+        <div className="ticket-filter-actions">
+          <button className="outline-button" type="button" onClick={() => setDraftFilterSelection({ brigadeIds: [], masterIds: [] })}>Сбросить</button>
+          <button className="primary-button" type="button" onClick={() => { setFilterSelection(draftFilterSelection); setFilterScreen(false) }}>Применить</button>
+        </div>
+      </section>}
+    </section>
+  }
+
   return (
     <section className="tickets-screen">
       <div className="tickets-heading">
@@ -970,6 +1052,7 @@ function Tickets({ day, session }: { day: TicketDay; session: Session }) {
           <button className="refresh-button" onClick={load} disabled={loading} aria-label="Обновить заявки">↻</button>
         </div>
       </div>
+      {scope === 'all' && <div className="ticket-filter-summary"><button className="outline-button" type="button" onClick={() => { setDraftFilterSelection(filterSelection); setFilterScreen(true) }}>Фильтр</button><small>{filterSummary}</small></div>}
       {error && <ErrorBox text={error} />}
       {dialNotice && <SuccessBox text={dialNotice} />}
       {loading

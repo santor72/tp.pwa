@@ -24,6 +24,7 @@ from app.schemas import (
     LoginRequest,
     SessionResponse,
     TicketCompletionRequest,
+    TicketFiltersResponse,
     TicketResponse,
 )
 from app.session_store import SessionStore
@@ -230,19 +231,48 @@ async def logout(
     return response
 
 
+def ticket_filter_ids(value: str | None) -> list[str] | None:
+    if value is None:
+        return None
+    values = list(dict.fromkeys(item.strip() for item in value.split(",") if item.strip()))
+    if len(values) > 100:
+        raise ApiError(422, "VALIDATION_ERROR", "Слишком много значений фильтра")
+    return values
+
+
+@app.get("/api/tickets/filters", response_model=TicketFiltersResponse)
+async def ticket_filters(
+    request: Request,
+    session_pair: tuple[str, object] = Depends(require_session),
+) -> TicketFiltersResponse:
+    _, session = session_pair
+    actor = await actor_from_session(request, session)
+    if actor.role not in {UserRole.ADMIN, UserRole.MANAGER}:
+        raise PermissionDeniedError()
+    return await request.app.state.ticket_service.filters()
+
+
 @app.get("/api/tickets/{day}", response_model=list[TicketResponse])
 async def tickets_for_day(
     day: Literal["today", "tomorrow"],
     request: Request,
     session_pair: tuple[str, object] = Depends(require_session),
     scope: Literal["assigned", "all"] = "assigned",
+    brigade_ids: str | None = None,
+    master_ids: str | None = None,
 ) -> list[TicketResponse]:
     _, session = session_pair
     actor = await actor_from_session(request, session)
     if scope == "all" and actor.role not in {UserRole.ADMIN, UserRole.MANAGER}:
         raise PermissionDeniedError()
+    filter_brigade_ids = ticket_filter_ids(brigade_ids)
+    filter_master_ids = ticket_filter_ids(master_ids)
+    if scope != "all" and (filter_brigade_ids is not None or filter_master_ids is not None):
+        raise ApiError(422, "VALIDATION_ERROR", "Фильтр доступен только в режиме всех заявок")
     try:
-        result = await request.app.state.ticket_service.list_for_actor(actor, day, scope)
+        result = await request.app.state.ticket_service.list_for_actor(
+            actor, day, scope, filter_brigade_ids, filter_master_ids,
+        )
     except ApiError as exc:
         audit(
             logger,
@@ -250,6 +280,8 @@ async def tickets_for_day(
             user_id=str(actor.user_id), channel=actor.channel,
             day=day,
             scope=scope,
+            brigade_count=len(filter_brigade_ids or []),
+            master_count=len(filter_master_ids or []),
             result="failure",
             code=exc.code,
         )
@@ -260,6 +292,8 @@ async def tickets_for_day(
         user_id=str(actor.user_id), channel=actor.channel,
         day=day,
         scope=scope,
+        brigade_count=len(filter_brigade_ids or []),
+        master_count=len(filter_master_ids or []),
         count=len(result),
         result="success",
     )

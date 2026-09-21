@@ -12,7 +12,7 @@ from app.errors import (
     TechPortalNotConfiguredError,
     TechPortalResponseError,
 )
-from app.schemas import TechPortalTicket, TechPortalUser
+from app.schemas import TechPortalBrigade, TechPortalTicket, TechPortalUser
 
 logger = logging.getLogger(__name__)
 
@@ -28,14 +28,21 @@ class TechPortalClient:
         self._settings = settings
         self._transport = transport
 
-    async def tickets(self, user_id: int | str | None, date: str) -> list[TechPortalTicket]:
+    async def tickets(
+        self,
+        user_id: int | str | None,
+        date: str,
+        master_ids: list[int | str] | None = None,
+    ) -> list[TechPortalTicket]:
         ticket_filter: dict[str, Any] = {
             "tags": {},
             "createdBy": [],
             "scheduledTo": date,
             "scheduledFrom": date,
         }
-        if user_id is not None:
+        if master_ids is not None:
+            ticket_filter["masterIds"] = master_ids
+        elif user_id is not None:
             ticket_filter["masterIds"] = [user_id]
         tickets: dict[int, TechPortalTicket] = {}
         for page in range(self._settings.tp_tickets_max_pages):
@@ -66,6 +73,15 @@ class TechPortalClient:
             raise TechPortalResponseError()
         try:
             return [TechPortalUser.model_validate(item) for item in data]
+        except ValidationError as exc:
+            raise TechPortalResponseError() from exc
+
+    async def brigades(self) -> list[TechPortalBrigade]:
+        data = await self._request("GET", "techportal-user/brigades")
+        if not isinstance(data, list):
+            raise TechPortalResponseError()
+        try:
+            return [TechPortalBrigade.model_validate(item) for item in data]
         except ValidationError as exc:
             raise TechPortalResponseError() from exc
 

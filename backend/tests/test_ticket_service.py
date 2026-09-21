@@ -10,7 +10,7 @@ from app.cache_store import CacheStore
 from app.config import Settings
 from app.errors import ApiError, RepairCommentRequiredError, TicketNotFoundError
 from app.actors import Actor
-from app.schemas import TechPortalTicket, TechPortalUser
+from app.schemas import TechPortalBrigade, TechPortalTicket, TechPortalUser
 from app.tickets import TicketService
 
 MOSCOW = ZoneInfo("Europe/Moscow")
@@ -21,17 +21,26 @@ class FakeTechPortal:
         self.ticket_result = tickets
         self.sparse_persist = sparse_persist
         self.ticket_calls: list[tuple[int | str, str]] = []
+        self.ticket_master_filters: list[list[int | str] | None] = []
         self.persist_calls: list[tuple[int, dict[str, Any]]] = []
         self.comment_persist_calls: list[dict[str, Any]] = []
         self.user_calls = 0
+        self.user_result = [TechPortalUser(id=3, name="Константин")]
+        self.brigade_calls = 0
+        self.brigade_result: list[TechPortalBrigade] = []
 
-    async def tickets(self, user_id: int | str | None, date: str) -> list[TechPortalTicket]:
+    async def tickets(self, user_id: int | str | None, date: str, master_ids: list[int | str] | None = None) -> list[TechPortalTicket]:
         self.ticket_calls.append((user_id, date))
+        self.ticket_master_filters.append(master_ids)
         return self.ticket_result
 
     async def users(self) -> list[TechPortalUser]:
         self.user_calls += 1
-        return [TechPortalUser(id=3, name="Константин")]
+        return self.user_result
+
+    async def brigades(self) -> list[TechPortalBrigade]:
+        self.brigade_calls += 1
+        return self.brigade_result
 
     async def persist_ticket(self, ticket_id: int, tags: dict[str, Any]) -> TechPortalTicket:
         self.persist_calls.append((ticket_id, tags))
@@ -138,6 +147,75 @@ async def test_all_scope_does_not_filter_and_marks_tickets_read_only() -> None:
     assert all(not item.can_change_completion for item in result)
     assert result[1].assigned_masters == ["Пользователь #112"]
     assert client.ticket_calls[0][0] is None
+
+
+@pytest.mark.asyncio
+async def test_all_scope_resolves_brigades_and_masters_to_unique_master_ids() -> None:
+    client = FakeTechPortal([ticket(), ticket(99, masters=[112])])
+    client.brigade_result = [TechPortalBrigade(id=4, name="Монтажники", masterIds=[87, 112])]
+    actor = Actor(user_id=uuid4(), techportal_user_id="87", channel="pwa")
+
+    result = await service(client).list_for_actor(actor, "today", "all", ["4"], ["112"])
+
+    assert [item.id for item in result] == [32412, 99]
+    assert client.brigade_calls == 1
+    assert client.ticket_master_filters == [["112", "87"]]
+
+
+@pytest.mark.asyncio
+async def test_all_scope_with_unknown_brigade_returns_empty_without_ticket_request() -> None:
+    client = FakeTechPortal([ticket()])
+    actor = Actor(user_id=uuid4(), techportal_user_id="87", channel="pwa")
+
+    result = await service(client).list_for_actor(actor, "today", "all", ["missing"])
+
+    assert result == []
+    assert client.ticket_calls == []
+
+
+@pytest.mark.asyncio
+async def test_filters_returns_cached_master_and_brigade_directory() -> None:
+    client = FakeTechPortal([ticket()])
+    client.brigade_result = [TechPortalBrigade(id=4, name="Монтажники", masterIds=[3, 112])]
+    ticket_service = service(client)
+
+    first = await ticket_service.filters()
+    second = await ticket_service.filters()
+
+    assert [master.model_dump() for master in first.masters] == [{"id": "3", "name": "Константин"}]
+    assert first == second
+    assert first.brigades[0].model_dump() == {"id": "4", "name": "Константин", "master_ids": ["3", "112"]}
+    assert client.user_calls == 1
+    assert client.brigade_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_filters_excludes_users_that_are_not_members_of_a_brigade() -> None:
+    client = FakeTechPortal([ticket()])
+    client.user_result = [
+        TechPortalUser(id=3, name="Константин"),
+        TechPortalUser(id=87, name="Иван"),
+    ]
+    client.brigade_result = [TechPortalBrigade(id=4, name="Монтажники", masterIds=[87])]
+
+    result = await service(client).filters()
+
+    assert [master.model_dump() for master in result.masters] == [{"id": "87", "name": "Иван"}]
+    assert result.brigades[0].name == "Иван"
+
+
+@pytest.mark.asyncio
+async def test_filters_uses_only_surnames_for_brigade_labels() -> None:
+    client = FakeTechPortal([ticket()])
+    client.user_result = [
+        TechPortalUser(id=87, name="Иванов Иван", lastName="Иванов"),
+        TechPortalUser(id=112, name="Петров Пётр", lastName="Петров"),
+    ]
+    client.brigade_result = [TechPortalBrigade(id=4, name="Монтажники", masterIds=[87, 112])]
+
+    result = await service(client).filters()
+
+    assert result.brigades[0].name == "Иванов, Петров"
 
 
 @pytest.mark.asyncio

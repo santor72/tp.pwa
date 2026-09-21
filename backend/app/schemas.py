@@ -5,7 +5,7 @@ from typing import Any, Literal
 from uuid import UUID
 
 import phonenumbers
-from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
 from app.roles import UserRole, role_for_status
 
@@ -307,6 +307,34 @@ class TechPortalUser(BaseModel):
     name: str | None = None
     firstName: str | None = None
     lastName: str | None = None
+
+
+class TechPortalBrigade(BaseModel):
+    """Состав бригады из справочника ТехПортала."""
+
+    model_config = ConfigDict(populate_by_name=True)
+    id: int | str
+    name: str | None = None
+    master_ids: list[int | str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("masterIds", "masters"),
+    )
+
+
+class TicketFilterMaster(BaseModel):
+    id: str
+    name: str
+
+
+class TicketFilterBrigade(BaseModel):
+    id: str
+    name: str
+    master_ids: list[str] = Field(default_factory=list)
+
+
+class TicketFiltersResponse(BaseModel):
+    masters: list[TicketFilterMaster] = Field(default_factory=list)
+    brigades: list[TicketFilterBrigade] = Field(default_factory=list)
 
 
 class TicketComment(BaseModel):
