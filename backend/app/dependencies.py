@@ -5,6 +5,7 @@ from fastapi import Depends, Request
 
 from app.config import Settings, get_settings
 from app.actors import Actor
+from app.capabilities import gis_visible_for_techportal_role
 from app.errors import CsrfError, OriginError, SessionExpiredError, PermissionDeniedError
 from app.logging import audit, stable_hash
 
@@ -48,6 +49,27 @@ async def require_csrf(
     supplied = request.headers.get("x-csrf-token", "")
     if not secrets.compare_digest(supplied, session_pair[1].csrf_token):
         raise CsrfError()
+    return session_pair
+
+
+def require_gis_access(session: SessionData, settings: Settings) -> None:
+    if not gis_visible_for_techportal_role(session.user.status, settings.gis_visible_techportal_roles):
+        raise PermissionDeniedError()
+
+
+async def require_gis_session(
+    session_pair: tuple[str, SessionData] = Depends(require_session),
+    settings: Settings = Depends(get_settings),
+) -> tuple[str, SessionData]:
+    require_gis_access(session_pair[1], settings)
+    return session_pair
+
+
+async def require_gis_csrf(
+    session_pair: tuple[str, SessionData] = Depends(require_csrf),
+    settings: Settings = Depends(get_settings),
+) -> tuple[str, SessionData]:
+    require_gis_access(session_pair[1], settings)
     return session_pair
 
 

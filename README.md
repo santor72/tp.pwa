@@ -65,6 +65,10 @@ cookie отключён только для локального HTTP. В produc
 порт на HTTPS-домен из `S3_PUBLIC_BASE_URL`; URL должен включать bucket, например
 `https://s2.svc.point.online/techportal-reports`.
 
+`GIS_VISIBLE_TECHPORTAL_ROLES` ограничивает карту и выбор объекта GIS списком
+значений роли ТехПортала через запятую, например `admin,manager,user`. Пустое
+значение отключает GIS-интерфейс для всех пользователей.
+
 ## Production
 
 Создайте production override и укажите в нём публичный HTTPS origin:

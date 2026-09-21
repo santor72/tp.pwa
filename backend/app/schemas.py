@@ -39,6 +39,7 @@ class UserProfile(BaseModel):
 
 class Capabilities(BaseModel):
     payments: bool = False
+    gis: bool = False
     messenger_settings: bool = False
     all_tickets: bool = False
     payment_admin: bool = False

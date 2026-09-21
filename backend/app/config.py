@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     gis_base_url: str = ''
     gis_api_token: SecretStr = SecretStr('')
     gis_timeout_seconds: float = Field(default=20.0, gt=0, le=120)
+    gis_visible_techportal_roles: str = ''
     s3_endpoint_url: str = ''
     s3_access_key_id: str = ''
     s3_secret_access_key: SecretStr = SecretStr('')

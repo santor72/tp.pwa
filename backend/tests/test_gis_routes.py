@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from app.dependencies import require_csrf
+from app.dependencies import require_gis_csrf
 from app.routers.gis import router
 from app.schemas import SessionData, UserProfile
 
@@ -43,7 +43,7 @@ def test_map_report_uses_server_author_and_reserved_ticket_id():
     async def csrf_override():
         return 'session', session
 
-    app.dependency_overrides[require_csrf] = csrf_override
+    app.dependency_overrides[require_gis_csrf] = csrf_override
     feature_id, external_report_id, completion_id = uuid4(), uuid4(), uuid4()
     response = TestClient(app).post('/api/gis/reports', data={
         'feature_id': str(feature_id),

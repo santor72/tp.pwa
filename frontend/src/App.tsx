@@ -737,6 +737,7 @@ function TicketDetails({
   onToggle,
   onDial,
   onCompleteConnection,
+  gisAllowed,
 }: {
   ticket: Ticket
   busy: boolean
@@ -746,6 +747,7 @@ function TicketDetails({
   onToggle: (comment?: string) => void
   onDial: (phone: string) => void
   onCompleteConnection: (techportalText: string, gisText: string, photos: File[], featureId: string | undefined, idempotencyKey: string) => Promise<ConnectionCompletion>
+  gisAllowed: boolean
 }) {
   const [techportalText, setTechportalText] = useState('')
   const [gisText, setGisText] = useState('')
@@ -818,7 +820,7 @@ function TicketDetails({
         {editable && isConnectionReport && <>
           <Field label="Отчёт для ТехПортала"><textarea aria-label="Отчёт для ТехПортала" value={techportalText} onChange={event => setTechportalText(event.target.value)} rows={3} placeholder="Комментарий о выполненных работах" /></Field>
           <Field label="Фотографии"><input aria-label="Фотографии выполнения" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" multiple onChange={event => setPhotos(Array.from(event.target.files ?? []))} /></Field>
-          <div className="field"><span>Объект GIS — необязательно</span><GisFeaturePicker value={featureId} onChange={setFeatureId} /></div>
+          {gisAllowed && <div className="field"><span>Объект GIS — необязательно</span><GisFeaturePicker value={featureId} onChange={setFeatureId} /></div>}
           {featureId && <Field label="Отчёт для GIS"><textarea aria-label="Отчёт для GIS" value={gisText} onChange={event => setGisText(event.target.value)} rows={3} placeholder="Описание для отчёта GIS" /></Field>}
           {completionError && <ErrorBox text={completionError} />}
         </>}
@@ -946,6 +948,7 @@ function Tickets({ day, session }: { day: TicketDay; session: Session }) {
             }
             return completion
           }}
+          gisAllowed={session.capabilities.gis}
         />
       </>
     )
@@ -1331,6 +1334,7 @@ function MapScreen({ session }: { session: Session }) {
 function AppShell({ session, onLogout }: { session: Session; onLogout: () => void }) {
   const [tab, setTab] = useState<AppTab>('today')
   const paymentsAllowed = session.capabilities.payments
+  const gisAllowed = session.capabilities.gis
   const messengerSettingsAllowed = session.capabilities.messenger_settings
   const ticketDay: TicketDay = tab === 'today' || tab === 'tomorrow' ? tab : 'today'
   return (
@@ -1343,13 +1347,13 @@ function AppShell({ session, onLogout }: { session: Session; onLogout: () => voi
         ? <Settings session={session} />
         : tab === 'payments' && paymentsAllowed
         ? <Payments session={session} />
-        : tab === 'map'
+        : tab === 'map' && gisAllowed
         ? <MapScreen session={session} />
         : <Tickets key={ticketDay} day={ticketDay} session={session} />}
       <nav className="bottom-nav" aria-label="Основные разделы">
         <button className={tab === 'today' ? 'active' : ''} onClick={() => setTab('today')} aria-label="Сегодня" title="Сегодня"><span aria-hidden="true">●</span></button>
         <button className={tab === 'tomorrow' ? 'active' : ''} onClick={() => setTab('tomorrow')} aria-label="Завтра" title="Завтра"><span aria-hidden="true">◐</span></button>
-        <button className={tab === 'map' ? 'active' : ''} onClick={() => setTab('map')} aria-label="Карта" title="Карта"><span aria-hidden="true">⌖</span></button>
+        {gisAllowed && <button className={tab === 'map' ? 'active' : ''} onClick={() => setTab('map')} aria-label="Карта" title="Карта"><span aria-hidden="true">⌖</span></button>}
         {paymentsAllowed && <button className={tab === 'payments' ? 'active' : ''} onClick={() => setTab('payments')} aria-label="Оплата" title="Оплата"><span aria-hidden="true">₽</span></button>}
         {messengerSettingsAllowed && <button className={tab === 'settings' ? 'active' : ''} onClick={() => setTab('settings')} aria-label="Настройки" title="Настройки"><span aria-hidden="true">⚙</span></button>}
       </nav>

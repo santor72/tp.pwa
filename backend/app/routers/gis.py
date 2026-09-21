@@ -3,7 +3,7 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 
-from app.dependencies import require_csrf, require_session
+from app.dependencies import require_gis_csrf, require_gis_session
 from app.errors import ApiError
 from app.report_photos import MAX_PHOTO_BYTES, validate_report_photo
 from app.schemas import SessionData
@@ -12,32 +12,32 @@ router = APIRouter(prefix='/api/gis', tags=['gis'])
 
 
 @router.get('/maps')
-async def maps(request: Request, _: tuple[str, SessionData] = Depends(require_session)):
+async def maps(request: Request, _: tuple[str, SessionData] = Depends(require_gis_session)):
     return await request.app.state.gis_client.maps()
 
 
 @router.get('/maps/{map_id}/layers')
-async def layers(map_id: UUID, request: Request, _: tuple[str, SessionData] = Depends(require_session)):
+async def layers(map_id: UUID, request: Request, _: tuple[str, SessionData] = Depends(require_gis_session)):
     return await request.app.state.gis_client.layers(str(map_id))
 
 
 @router.get('/maps/{map_id}/bounds')
-async def bounds(map_id: UUID, request: Request, _: tuple[str, SessionData] = Depends(require_session)):
+async def bounds(map_id: UUID, request: Request, _: tuple[str, SessionData] = Depends(require_gis_session)):
     return await request.app.state.gis_client.bounds(str(map_id))
 
 
 @router.get('/maps/{map_id}/features')
-async def features(map_id: UUID, request: Request, bbox: str = Query(pattern=r'^-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?$'), layers: str | None = Query(default=None, max_length=2048), _: tuple[str, SessionData] = Depends(require_session)):
+async def features(map_id: UUID, request: Request, bbox: str = Query(pattern=r'^-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?$'), layers: str | None = Query(default=None, max_length=2048), _: tuple[str, SessionData] = Depends(require_gis_session)):
     return await request.app.state.gis_client.features(str(map_id), bbox=bbox, layers=layers)
 
 
 @router.get('/maps/{map_id}/search')
-async def search(map_id: UUID, request: Request, q: str = Query(min_length=1, max_length=200), _: tuple[str, SessionData] = Depends(require_session)):
+async def search(map_id: UUID, request: Request, q: str = Query(min_length=1, max_length=200), _: tuple[str, SessionData] = Depends(require_gis_session)):
     return await request.app.state.gis_client.search(str(map_id), q)
 
 
 @router.get('/features/{feature_id}')
-async def feature(feature_id: UUID, request: Request, _: tuple[str, SessionData] = Depends(require_session)):
+async def feature(feature_id: UUID, request: Request, _: tuple[str, SessionData] = Depends(require_gis_session)):
     return await request.app.state.gis_client.feature(str(feature_id))
 
 
@@ -49,7 +49,7 @@ async def create_report(
     completion_id: UUID = Form(),
     text: str = Form(default='', max_length=10_000),
     photos: list[UploadFile] = File(default=[]),
-    session_pair: tuple[str, SessionData] = Depends(require_csrf),
+    session_pair: tuple[str, SessionData] = Depends(require_gis_csrf),
 ):
     """Create a manual map report. Ticket 1 is the agreed sentinel until map reports get their own GIS type."""
     report_text = text.strip()

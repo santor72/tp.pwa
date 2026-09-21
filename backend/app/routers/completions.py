@@ -2,6 +2,8 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 
+from app.capabilities import gis_visible_for_techportal_role
+from app.config import Settings, get_settings
 from app.dependencies import actor_from_session, require_csrf, require_session
 from app.errors import ApiError
 from app.report_photos import MAX_PHOTO_BYTES, validate_report_photo
@@ -30,6 +32,7 @@ async def complete_connection(
     feature_id: UUID | None = Form(default=None),
     photos: list[UploadFile] = File(default=[]),
     session_pair: tuple[str, SessionData] = Depends(require_csrf),
+    settings: Settings = Depends(get_settings),
 ):
     techportal_report_text = techportal_text.strip()
     gis_report_text = gis_text.strip()
@@ -48,6 +51,8 @@ async def complete_connection(
         validate_report_photo(content_type, content)
         payload_photos.append({'name': photo.filename or 'photo', 'content_type': content_type, 'content': content})
     _, session = session_pair
+    if feature_id and not gis_visible_for_techportal_role(session.user.status, settings.gis_visible_techportal_roles):
+        raise ApiError(403, 'GIS_ACCESS_DENIED', 'Нет доступа к карте GIS')
     actor = await actor_from_session(request, session)
     technician_name = (session.user.first_name or session.user.email).strip() or str(session.user.id)
     technician_last_name = (session.user.last_name or '').strip()

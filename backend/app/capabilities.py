@@ -4,9 +4,16 @@ from app.roles import UserRole
 from app.schemas import Capabilities
 
 
-def capabilities_for(role: UserRole, permissions: dict, messenger_show: bool) -> Capabilities:
+def gis_visible_for_techportal_role(status: str | None, roles: str) -> bool:
+    allowed = {item.strip().lower() for item in roles.split(',') if item.strip()}
+    return bool(status and status.strip().lower() in allowed)
+
+
+def capabilities_for(role: UserRole, permissions: dict, messenger_show: bool, *, techportal_status: str | None = None,
+                     gis_visible_techportal_roles: str = '') -> Capabilities:
     return Capabilities(
         payments=has_permission(permissions, "tickets", "execution"),
+        gis=gis_visible_for_techportal_role(techportal_status, gis_visible_techportal_roles),
         messenger_settings=messenger_show or role is UserRole.ADMIN,
         all_tickets=role in {UserRole.ADMIN, UserRole.MANAGER},
         payment_admin=role is UserRole.ADMIN,

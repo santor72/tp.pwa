@@ -17,7 +17,7 @@ const session = {
     },
   },
   csrf_token: 'csrf-test',
-  capabilities: { payments: true, messenger_settings: true, all_tickets: false },
+  capabilities: { payments: true, gis: true, messenger_settings: true, all_tickets: false },
 }
 
 const ticket = {
@@ -385,6 +385,22 @@ describe('Карта сети', () => {
 })
 
 describe('Capabilities', () => {
+  it('скрывает карту и выбор объекта GIS для роли без GIS capability', async () => {
+    const restrictedSession = { ...session, capabilities: { ...session.capabilities, gis: false } }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/api/auth/session') return json(restrictedSession)
+      if (String(input) === '/api/tickets/today') return json([ticket])
+      throw new Error(`Неожиданный запрос: ${input}`)
+    }))
+
+    render(<App />)
+
+    await screen.findByRole('heading', { name: 'Заявки сегодня' })
+    expect(screen.queryByRole('button', { name: 'Карта' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /СНТ Волга/ }))
+    expect(screen.queryByRole('button', { name: 'Выбрать объект на карте' })).toBeNull()
+  })
+
   it('скрывает настройки, когда messenger_settings отключён', async () => {
     const restrictedSession = { ...session, capabilities: { ...session.capabilities, messenger_settings: false } }
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
