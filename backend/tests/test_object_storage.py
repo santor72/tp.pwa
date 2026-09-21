@@ -1,4 +1,5 @@
 import pytest
+from pydantic import ValidationError
 
 from app.config import Settings
 from app.errors import ApiError
@@ -24,6 +25,13 @@ def configured() -> Settings:
         s3_endpoint_url='http://seaweedfs:8333', s3_access_key_id='access', s3_secret_access_key='secret',
         s3_bucket='reports', s3_public_base_url='https://files.example/reports',
     )
+
+
+def test_s3_endpoint_accepts_http_and_https() -> None:
+    assert Settings(s3_endpoint_url='http://seaweedfs:8333').s3_endpoint_url == 'http://seaweedfs:8333'
+    assert Settings(s3_endpoint_url='https://s3.example').s3_endpoint_url == 'https://s3.example'
+    with pytest.raises(ValidationError, match='S3_ENDPOINT_URL должен использовать'):
+        Settings(s3_endpoint_url='ftp://s3.example')
 
 
 def test_storage_uses_path_style_for_internal_seaweedfs_endpoint():

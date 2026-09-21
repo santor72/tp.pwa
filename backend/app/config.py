@@ -152,8 +152,8 @@ class Settings(BaseSettings):
     @classmethod
     def normalize_s3_endpoint_url(cls, value: str) -> str:
         value = value.strip().rstrip('/')
-        if value and urlsplit(value).scheme != 'http':
-            raise ValueError('S3_ENDPOINT_URL должен использовать внутренний http://')
+        if value and urlsplit(value).scheme not in {'http', 'https'}:
+            raise ValueError('S3_ENDPOINT_URL должен использовать http:// или https://')
         return value
 
     @field_validator('s3_public_base_url')

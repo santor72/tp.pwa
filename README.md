@@ -67,7 +67,8 @@ cookie отключён только для локального HTTP. В produc
 и приложение должно работать за HTTPS.
 
 Для фотоотчётов заполните `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`,
-`S3_BUCKET` и `S3_PUBLIC_BASE_URL`. Compose запускает SeaweedFS, создаёт bucket
+`S3_BUCKET` и `S3_PUBLIC_BASE_URL`. `S3_ENDPOINT_URL` может указывать на
+внутренний HTTP либо доступный API внешний HTTPS S3 endpoint. Compose запускает SeaweedFS, создаёт bucket
 из `S3_BUCKET` и открывает его S3 API только на `127.0.0.1:8333` (порт можно
 изменить через `SEAWEEDFS_S3_PORT`). Внешний nginx должен проксировать этот
 порт на HTTPS-домен из `S3_PUBLIC_BASE_URL`; URL должен включать bucket, например
