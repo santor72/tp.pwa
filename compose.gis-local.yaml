@@ -4,6 +4,14 @@ services:
   api:
     environment:
       GIS_BASE_URL: http://localhost:18770
+    networks:
+      - default
+      - gis-local
+    extra_hosts:
+      - "localhost:192.168.24.38"
+  completion-worker:
+    environment:
+      GIS_BASE_URL: http://localhost:18770
     extra_hosts:
       - "localhost:192.168.24.38"
     networks:

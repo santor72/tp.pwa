@@ -651,6 +651,37 @@ describe('Заявки', () => {
     expect(new Headers(completionRequest?.headers).get('X-CSRF-Token')).toBe('csrf-test')
   })
 
+  it('завершает ремонт тем же отчётом, требуя текст и предлагая GIS и фото', async () => {
+    const repair = { ...ticket, kind: 'repair', tags: { 'Заявка на выезд': {} } }
+    let completionRequest: RequestInit | undefined
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input)
+      if (path === '/api/auth/session') return json(session)
+      if (path === '/api/tickets/today') return json([repair])
+      if (path === '/api/tickets/32412/ticket-completion') {
+        completionRequest = init
+        return json({ id: '11111111-1111-4111-8111-111111111111', ticket_id: 32412, completion_status: 'completed', gis_status: 'not_requested', gis_report_id: null, error_code: null, error_message: null, created_at: '2026-09-23T10:00:00Z', updated_at: '2026-09-23T10:00:00Z' })
+      }
+      throw new Error(`Неожиданный запрос: ${path}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: /СНТ Волга/ }))
+
+    expect(screen.getByLabelText('Что выполнено')).toBeTruthy()
+    expect(screen.getByText('Объект GIS — необязательно')).toBeTruthy()
+    expect(screen.getByLabelText('Фотографии выполнения')).toBeTruthy()
+    expect((screen.getByRole('button', { name: 'Завершить ремонт' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(screen.getByLabelText('Что выполнено'), { target: { value: 'Заменили кабель' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Завершить ремонт' }))
+
+    expect(await screen.findByText('Заявка отмечена выполненной. Отчёт добавлен в ТехПортал.')).toBeTruthy()
+    const form = completionRequest?.body as FormData
+    expect(form.get('ticket_kind')).toBe('repair')
+    expect(form.get('techportal_text')).toBe('Заменили кабель')
+    expect(form.get('gis_text')).toBe('')
+  })
+
   it('выбирает объект подключения полноценной картой и запоминает карту', async () => {
     const mapId = '11111111-1111-4111-8111-111111111111'
     const layerId = '22222222-2222-4222-8222-222222222222'

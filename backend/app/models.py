@@ -267,6 +267,7 @@ class ConnectionCompletionOperation(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     idempotency_key: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, unique=True)
     ticket_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    ticket_kind: Mapped[str] = mapped_column(String(16), nullable=False, default='connection')
     day: Mapped[str] = mapped_column(String(16), nullable=False)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey('users.id', ondelete='RESTRICT'), nullable=False)
     technician_external_id: Mapped[str] = mapped_column(String(128), nullable=False)

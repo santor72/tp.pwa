@@ -300,6 +300,23 @@ async def test_repair_requires_comment_and_persists_it_with_completion() -> None
 
 
 @pytest.mark.asyncio
+async def test_repair_completion_operation_checks_kind_and_records_comment() -> None:
+    source = ticket(tags={'Заявка на выезд': {}})
+    client = FakeTechPortal([source])
+    ticket_service = service(client)
+
+    await ticket_service.assert_ticket_assigned(87, 'today', source.id, 'repair')
+    with pytest.raises(TicketNotFoundError):
+        await ticket_service.assert_ticket_assigned(87, 'today', source.id, 'connection')
+    result = await ticket_service.mark_ticket_completed(87, 'today', source.id, 'Заменили кабель', 'repair')
+
+    assert result.completed is True
+    assert client.comment_persist_calls[-1]['comments'] == 'Заменили кабель'
+    assert client.comment_persist_calls[-1]['tags']['Работы произведены'] == {}
+
+
+
+@pytest.mark.asyncio
 async def test_completion_preserves_card_for_sparse_persist_response() -> None:
     source = ticket(tags={"Заявка на выезд": {}})
     client = FakeTechPortal([source], sparse_persist=True)

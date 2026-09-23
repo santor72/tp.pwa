@@ -1,5 +1,5 @@
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID, uuid4
 
 from app.actors import Actor
@@ -31,9 +31,12 @@ class ConnectionCompletionService:
     async def begin(self, actor: Actor, *, ticket_id: int, day: str, idempotency_key: UUID,
                     techportal_text: str, gis_text: str, feature_id: UUID | None,
                     photos: list[dict[str, Any]], technician_name: str, technician_last_name: str = '',
-                    upstream_cookies: dict[str, str] | None = None) -> Any:
-        await self._tickets.assert_connection_assigned(actor.techportal_user_id, day, ticket_id)
-        if not techportal_text and not (photos and self.photos_available):
+                    upstream_cookies: dict[str, str] | None = None,
+                    ticket_kind: Literal['connection', 'repair'] = 'connection') -> Any:
+        await self._tickets.assert_ticket_assigned(actor.techportal_user_id, day, ticket_id, ticket_kind)
+        if ticket_kind == 'repair' and not techportal_text:
+            raise ApiError(422, 'REPAIR_COMMENT_REQUIRED', 'Опишите выполненные работы')
+        if ticket_kind == 'connection' and not techportal_text and not (photos and self.photos_available):
             raise ApiError(422, 'CONNECTION_REPORT_REQUIRED', 'Добавьте текст для ТехПортала или фотографию')
         if feature_id and not gis_text and not photos:
             raise ApiError(422, 'GIS_REPORT_REQUIRED', 'Добавьте текст отчёта GIS или фотографию')
@@ -43,7 +46,7 @@ class ConnectionCompletionService:
             raise ApiError(503, 'PHOTO_STORAGE_NOT_CONFIGURED', 'Загрузка фотографий для заявок не настроена')
         feature_snapshot = await self._gis.feature(str(feature_id)) if feature_id else {}
         operation, created = await self._repository.create_or_get(
-            idempotency_key=idempotency_key, ticket_id=ticket_id, day=day, user_id=actor.user_id,
+            idempotency_key=idempotency_key, ticket_id=ticket_id, ticket_kind=ticket_kind, day=day, user_id=actor.user_id,
             technician_external_id=actor.techportal_user_id, technician_name=technician_name,
             technician_last_name=technician_last_name,
             feature_id=feature_id, feature_snapshot=feature_snapshot, external_report_id=uuid4() if feature_id else None,
@@ -53,7 +56,7 @@ class ConnectionCompletionService:
         if not created:
             if (operation.user_id != actor.user_id or operation.ticket_id != ticket_id or operation.day != day
                     or operation.techportal_text != techportal_text or operation.gis_text != gis_text
-                    or operation.feature_id != feature_id):
+                    or operation.feature_id != feature_id or operation.ticket_kind != ticket_kind):
                 raise ApiError(409, 'COMPLETION_IDEMPOTENCY_CONFLICT', 'Этот ключ уже использован для другого отчёта')
             return operation
         try:
@@ -78,8 +81,8 @@ class ConnectionCompletionService:
         if operation is None or operation.completion_status != 'marking':
             return operation
         try:
-            await self._tickets.mark_connection_completed(operation.technician_external_id, operation.day,
-                                                          operation.ticket_id, operation.techportal_comment or '')
+            await self._tickets.mark_ticket_completed(operation.technician_external_id, operation.day,
+                                                      operation.ticket_id, operation.techportal_comment or '', operation.ticket_kind)
         except (ServiceUnavailableError, TechPortalCallError) as exc:
             return await self._repository.update(operation_id, completion_status='completion_unknown',
                                                  next_attempt_at=datetime.now(UTC) + timedelta(minutes=1), lease_until=None,
@@ -100,8 +103,8 @@ class ConnectionCompletionService:
         if operation is None or operation.completion_status != 'completion_unknown':
             return operation
         try:
-            recorded = await self._tickets.connection_completion_recorded(
-                operation.technician_external_id, operation.ticket_id, operation.techportal_comment or '')
+            recorded = await self._tickets.ticket_completion_recorded(
+                operation.technician_external_id, operation.ticket_id, operation.techportal_comment or '', operation.ticket_kind)
         except (ServiceUnavailableError, TechPortalCallError) as exc:
             return await self._repository.update(operation_id, lease_until=None,
                 next_attempt_at=datetime.now(UTC) + timedelta(minutes=1), last_error_code=exc.code, last_error_message=exc.message)

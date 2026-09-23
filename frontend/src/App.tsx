@@ -43,8 +43,8 @@ const GIS_SELECTED_MAP_KEY = 'tp-pwa.gis.selected-map'
 const GIS_MAP_VIEW_KEY = 'tp-pwa.gis.map-view'
 const CONNECTION_COMPLETION_KEY_PREFIX = 'tp-pwa:connection-completion:'
 
-function connectionCompletionKey(ticketId: number) {
-  return `${CONNECTION_COMPLETION_KEY_PREFIX}${ticketId}`
+function connectionCompletionKey(ticketId: number, kind: Ticket['kind']) {
+  return kind === 'connection' ? `${CONNECTION_COMPLETION_KEY_PREFIX}${ticketId}` : `tp-pwa:repair-completion:${ticketId}`
 }
 
 function ticketFilterKey(userId: string | number) {
@@ -753,7 +753,7 @@ function TicketDetails({
   onBack,
   onToggle,
   onDial,
-  onCompleteConnection,
+  onCompleteTicket,
   gisAllowed,
   connectionPhotosAllowed,
   gisPhotosAllowed,
@@ -765,7 +765,7 @@ function TicketDetails({
   onBack: () => void
   onToggle: (comment?: string) => void
   onDial: (phone: string) => void
-  onCompleteConnection: (techportalText: string, gisText: string, photos: File[], featureId: string | undefined, idempotencyKey: string) => Promise<ConnectionCompletion>
+  onCompleteTicket: (techportalText: string, gisText: string, photos: File[], featureId: string | undefined, idempotencyKey: string) => Promise<ConnectionCompletion>
   gisAllowed: boolean
   connectionPhotosAllowed: boolean
   gisPhotosAllowed: boolean
@@ -780,36 +780,37 @@ function TicketDetails({
   const completionIdempotencyKey = useRef(createUuid())
   const photosForTechPortal = connectionPhotosAllowed && photos.length > 0
   const needsComment = ticket.kind === 'repair' && !ticket.completed
-  const isConnectionReport = ticket.kind === 'connection' && !ticket.completed
+  const isReport = !ticket.completed
   useEffect(() => {
     if (!connectionPhotosAllowed && !featureId) setPhotos([])
   }, [connectionPhotosAllowed, featureId])
   useEffect(() => {
-    const operationId = sessionStorage.getItem(connectionCompletionKey(ticket.id))
+    const operationId = sessionStorage.getItem(connectionCompletionKey(ticket.id, ticket.kind))
     if (!operationId) return
     let active = true
     api.connectionCompletion(operationId)
       .then(value => { if (active) setCompletion(value) })
       .catch(() => undefined)
     return () => { active = false }
-  }, [ticket.id])
+  }, [ticket.id, ticket.kind])
   useEffect(() => {
-    if (completion?.ticket_id === ticket.id) sessionStorage.setItem(connectionCompletionKey(ticket.id), completion.id)
-  }, [completion, ticket.id])
+    if (completion?.ticket_id === ticket.id) sessionStorage.setItem(connectionCompletionKey(ticket.id, ticket.kind), completion.id)
+  }, [completion, ticket.id, ticket.kind])
   useEffect(() => {
     if (!completion || !['prepared', 'marking'].includes(completion.completion_status) && !['pending', 'sending', 'retry_wait'].includes(completion.gis_status)) return
     const timer = window.setInterval(() => api.connectionCompletion(completion.id).then(setCompletion).catch(() => undefined), 3_000)
     return () => window.clearInterval(timer)
   }, [completion?.id, completion?.completion_status, completion?.gis_status])
-  async function submitConnection() {
+  async function submitReport() {
     const portalText = techportalText.trim()
     const mapText = gisText.trim()
-    if (!portalText && !photosForTechPortal) { setCompletionError('Добавьте текст для ТехПортала или фотографию'); return }
+    if (needsComment && !portalText) { setCompletionError('Опишите выполненные работы'); return }
+    if (!needsComment && !portalText && !photosForTechPortal) { setCompletionError('Добавьте текст для ТехПортала или фотографию'); return }
     if (featureId.trim() && !mapText && !photos.length) { setCompletionError('Добавьте текст отчёта GIS или фотографию'); return }
     if (featureId.trim() && photos.length && !gisPhotosAllowed) { setCompletionError('Для отправки фотографий в GIS требуется настроенное S3-хранилище'); return }
     setSubmitting(true); setCompletionError('')
     try {
-      setCompletion(await onCompleteConnection(portalText, mapText, photos, featureId.trim() || undefined, completionIdempotencyKey.current))
+      setCompletion(await onCompleteTicket(portalText, mapText, photos, featureId.trim() || undefined, completionIdempotencyKey.current))
     } catch (cause) {
       setCompletionError(errorMessage(cause))
     } finally {
@@ -842,17 +843,16 @@ function TicketDetails({
           <h2>Описание</h2>
           <p>{ticket.description || 'Описание отсутствует'}</p>
         </div>
-        {editable && needsComment && <Field label="Что выполнено" required><textarea aria-label="Что выполнено" value={techportalText} onChange={event => setTechportalText(event.target.value)} rows={4} placeholder="Опишите выполненные работы" /></Field>}
-        {editable && isConnectionReport && <>
-          <Field label="Отчёт для ТехПортала" required={!connectionPhotosAllowed}><textarea aria-label="Отчёт для ТехПортала" value={techportalText} onChange={event => setTechportalText(event.target.value)} rows={3} placeholder="Комментарий о выполненных работах" /></Field>
+        {editable && isReport && <>
+          <Field label={needsComment ? 'Что выполнено' : 'Отчёт для ТехПортала'} required={needsComment || !connectionPhotosAllowed}><textarea aria-label={needsComment ? 'Что выполнено' : 'Отчёт для ТехПортала'} value={techportalText} onChange={event => setTechportalText(event.target.value)} rows={needsComment ? 4 : 3} placeholder={needsComment ? 'Опишите выполненные работы' : 'Комментарий о выполненных работах'} /></Field>
           {gisAllowed && <div className="field"><span>Объект GIS — необязательно</span><GisFeaturePicker value={featureId} onChange={setFeatureId} /></div>}
           {(connectionPhotosAllowed || (featureId && gisPhotosAllowed)) && <Field label={connectionPhotosAllowed ? 'Фотографии' : 'Фотографии для GIS'}><input aria-label="Фотографии выполнения" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" multiple onChange={event => setPhotos(Array.from(event.target.files ?? []))} /></Field>}
           {featureId && <Field label="Отчёт для GIS" required={!gisPhotosAllowed}><textarea aria-label="Отчёт для GIS" value={gisText} onChange={event => setGisText(event.target.value)} rows={3} placeholder="Описание для отчёта GIS" /></Field>}
           {completionError && <ErrorBox text={completionError} />}
         </>}
         {completionNotice && <div className={completion?.completion_status === 'completed' ? 'success-box' : 'error-box'}>{completionNotice}</div>}
-        {editable && <button className="primary-button" disabled={busy || submitting || (needsComment && !techportalText.trim())} onClick={() => isConnectionReport ? void submitConnection() : onToggle(needsComment ? techportalText.trim() : undefined)}>
-          {submitting ? 'Сохраняем…' : busy ? 'Сохранение…' : isConnectionReport ? 'Отметить выполненной' : needsComment ? 'Завершить ремонт' : ticket.completed ? 'Вернуть в работу' : 'Отметить исполненной'}
+        {editable && <button className="primary-button" disabled={busy || submitting || (needsComment && !techportalText.trim())} onClick={() => isReport ? void submitReport() : onToggle()}>
+          {submitting ? 'Сохраняем…' : busy ? 'Сохранение…' : isReport ? (needsComment ? 'Завершить ремонт' : 'Отметить выполненной') : 'Вернуть в работу'}
         </button>}
       </div>
       <section className="comments-section">
@@ -991,8 +991,8 @@ function Tickets({ day, session }: { day: TicketDay; session: Session }) {
           onBack={() => { setSelectedId(null); setError('') }}
           onToggle={comment => toggle(selected, comment)}
           onDial={phone => dial(selected, phone)}
-          onCompleteConnection={async (techportalText, gisText, photos, featureId, idempotencyKey) => {
-            const completion = await api.completeConnection(selected.id, { day, idempotencyKey, techportalText, gisText, photos, featureId }, session.csrf_token)
+          onCompleteTicket={async (techportalText, gisText, photos, featureId, idempotencyKey) => {
+            const completion = await api.completeConnection(selected.id, { day, ticketKind: selected.kind, idempotencyKey, techportalText, gisText, photos, featureId }, session.csrf_token)
             if (completion.completion_status === 'completed') {
               setTickets(current => current.map(item => item.id === selected.id ? { ...item, completed: true } : item))
             }

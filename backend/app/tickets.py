@@ -185,24 +185,34 @@ class TicketService:
         return await self.set_completed(actor.techportal_user_id, day, ticket_id, completed, comment)
 
     async def assert_connection_assigned(self, user_id: int | str, day: str, ticket_id: int) -> None:
+        await self.assert_ticket_assigned(user_id, day, ticket_id, 'connection')
+
+    async def assert_ticket_assigned(self, user_id: int | str, day: str, ticket_id: int,
+                                     ticket_kind: Literal['connection', 'repair']) -> None:
         if day not in {'today', 'tomorrow'}:
             raise TicketNotFoundError()
         offset = 0 if day == 'today' else 1
         target = datetime.now(MOSCOW).date() + timedelta(days=offset)
         tickets = await self._client.tickets(user_id, target.strftime('%d.%m.%Y'))
         ticket = next((item for item in tickets if item.id == ticket_id and self._is_master(item, user_id)), None)
-        if ticket is None or CONNECTION_TAG not in ticket.tags:
+        if ticket is None or (CONNECTION_TAG in ticket.tags) != (ticket_kind == 'connection'):
             raise TicketNotFoundError()
 
     async def mark_connection_completed(self, user_id: int | str, day: str, ticket_id: int, comment: str) -> TicketResponse:
+        return await self.mark_ticket_completed(user_id, day, ticket_id, comment, 'connection')
+
+    async def mark_ticket_completed(self, user_id: int | str, day: str, ticket_id: int, comment: str,
+                                    ticket_kind: Literal['connection', 'repair']) -> TicketResponse:
         if not comment.strip():
+            if ticket_kind == 'repair':
+                raise RepairCommentRequiredError()
             raise ApiError(422, 'CONNECTION_REPORT_REQUIRED', 'Добавьте текст отчёта или фотографию')
-        await self.assert_connection_assigned(user_id, day, ticket_id)
+        await self.assert_ticket_assigned(user_id, day, ticket_id, ticket_kind)
         raw_ticket = await self._client.ticket_by_id(ticket_id)
         if raw_ticket is None:
             raise TicketNotFoundError()
         ticket = TechPortalTicket.model_validate(raw_ticket)
-        if not self._is_master(ticket, user_id) or CONNECTION_TAG not in ticket.tags:
+        if not self._is_master(ticket, user_id) or (CONNECTION_TAG in ticket.tags) != (ticket_kind == 'connection'):
             raise TicketNotFoundError()
         updated_tags = dict(ticket.tags)
         updated_tags[COMPLETED_TAG] = {}
@@ -214,11 +224,17 @@ class TicketService:
         return self._normalize(ticket.model_copy(update=persisted_fields), users)
 
     async def connection_completion_recorded(self, user_id: int | str, ticket_id: int, comment: str) -> bool:
+        return await self.ticket_completion_recorded(user_id, ticket_id, comment, 'connection')
+
+    async def ticket_completion_recorded(self, user_id: int | str, ticket_id: int, comment: str,
+                                         ticket_kind: Literal['connection', 'repair']) -> bool:
         raw_ticket = await self._client.ticket_by_id(ticket_id)
         if raw_ticket is None:
             return False
         ticket = TechPortalTicket.model_validate(raw_ticket)
-        if not self._is_master(ticket, user_id) or CONNECTION_TAG not in ticket.tags or COMPLETED_TAG not in ticket.tags:
+        if (not self._is_master(ticket, user_id)
+                or (CONNECTION_TAG in ticket.tags) != (ticket_kind == 'connection')
+                or COMPLETED_TAG not in ticket.tags):
             return False
         return any(
             any(change.key == 'comments' and self._comment_text(change.value) == comment for change in entry.changes)

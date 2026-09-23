@@ -100,7 +100,7 @@ async def request_logging(request: Request, call_next):
         request.state.timing_started_at = datetime.now(UTC)
         request.state.timing_started = started
     try:
-        if request.method == 'POST' and request.url.path.endswith('/connection-completion'):
+        if request.method == 'POST' and request.url.path.endswith(('/connection-completion', '/ticket-completion')):
             try:
                 content_length = int(request.headers.get('content-length', '0'))
             except ValueError:

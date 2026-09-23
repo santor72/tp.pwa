@@ -1,3 +1,4 @@
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
@@ -22,11 +23,13 @@ def response(operation) -> ConnectionCompletionResponse:
 
 
 @router.post('/{ticket_id}/connection-completion', response_model=ConnectionCompletionResponse)
+@router.post('/{ticket_id}/ticket-completion', response_model=ConnectionCompletionResponse)
 async def complete_connection(
     ticket_id: int,
     request: Request,
     day: str = Form(),
     idempotency_key: UUID = Form(),
+    ticket_kind: Literal['connection', 'repair'] = Form(default='connection'),
     techportal_text: str = Form(default='', max_length=10_000),
     gis_text: str = Form(default='', max_length=10_000),
     feature_id: UUID | None = Form(default=None),
@@ -41,14 +44,16 @@ async def complete_connection(
     if len(photos) > 5:
         raise ApiError(422, 'REPORT_PHOTOS_LIMIT', 'В одном отчёте можно загрузить до 5 фотографий')
     completion_service = request.app.state.connection_completion_service
+    if ticket_kind == 'repair' and not techportal_report_text:
+        raise ApiError(422, 'REPAIR_COMMENT_REQUIRED', 'Опишите выполненные работы')
+    if ticket_kind == 'connection' and not techportal_report_text and not (photos and completion_service.photos_available):
+        raise ApiError(422, 'CONNECTION_REPORT_REQUIRED', 'Добавьте текст для ТехПортала или фотографию')
+    if feature_id and not gis_report_text and not photos:
+        raise ApiError(422, 'GIS_REPORT_REQUIRED', 'Добавьте текст отчёта GIS или фотографию')
     if photos and not completion_service.photos_available and not feature_id:
         raise ApiError(503, 'PHOTO_STORAGE_NOT_CONFIGURED', 'Загрузка фотографий для заявок не настроена')
     if feature_id and photos and not completion_service.gis_photos_available:
         raise ApiError(503, 'GIS_PHOTO_STORAGE_NOT_CONFIGURED', 'Для отправки фотографий в GIS требуется настроенное S3-хранилище')
-    if not techportal_report_text and not (photos and completion_service.photos_available):
-        raise ApiError(422, 'CONNECTION_REPORT_REQUIRED', 'Добавьте текст для ТехПортала или фотографию')
-    if feature_id and not gis_report_text and not photos:
-        raise ApiError(422, 'GIS_REPORT_REQUIRED', 'Добавьте текст отчёта GIS или фотографию')
     payload_photos = []
     for photo in photos:
         content_type = photo.content_type or ''
@@ -62,7 +67,7 @@ async def complete_connection(
     technician_name = (session.user.first_name or session.user.email).strip() or str(session.user.id)
     technician_last_name = (session.user.last_name or '').strip()
     operation = await request.app.state.connection_completion_service.begin(
-        actor, ticket_id=ticket_id, day=day, idempotency_key=idempotency_key,
+        actor, ticket_id=ticket_id, ticket_kind=ticket_kind, day=day, idempotency_key=idempotency_key,
         techportal_text=techportal_report_text, gis_text=gis_report_text, feature_id=feature_id,
         photos=payload_photos, technician_name=technician_name, technician_last_name=technician_last_name,
         upstream_cookies=session.upstream_cookies,
@@ -72,6 +77,7 @@ async def complete_connection(
 
 
 @router.get('/connection-completions/{operation_id}', response_model=ConnectionCompletionResponse)
+@router.get('/ticket-completions/{operation_id}', response_model=ConnectionCompletionResponse)
 async def connection_completion_status(
     operation_id: UUID,
     request: Request,

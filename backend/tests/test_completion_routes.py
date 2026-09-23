@@ -62,10 +62,43 @@ def test_connection_completion_requires_csrf_and_passes_server_context():
     actor, values = completion.begin_args
     assert actor.techportal_user_id == '17'
     assert values == {
-        'ticket_id': 32412, 'day': 'today', 'idempotency_key': key, 'techportal_text': 'Подключили', 'gis_text': '',
+        'ticket_id': 32412, 'ticket_kind': 'connection', 'day': 'today', 'idempotency_key': key, 'techportal_text': 'Подключили', 'gis_text': '',
         'feature_id': None, 'photos': [], 'technician_name': 'Иван', 'technician_last_name': 'Иванов',
         'upstream_cookies': {'tp-session': 'employee'},
     }
+
+
+def test_repair_completion_requires_text_and_passes_ticket_kind():
+    app = FastAPI()
+    completion = FakeCompletionService()
+    app.state.connection_completion_service = completion
+    app.add_exception_handler(ApiError, api_error)
+    app.include_router(router)
+    session = SessionData(
+        user=UserProfile(id=17, email='tech@example.test', first_name='Иван', status='active'),
+        internal_user_id=uuid4(), csrf_token='csrf', created_at=datetime.now(UTC),
+        absolute_expires_at=datetime.now(UTC) + timedelta(hours=1),
+    )
+
+    async def csrf_override():
+        return 'session', session
+
+    app.dependency_overrides[require_csrf] = csrf_override
+    client = TestClient(app)
+    empty = client.post('/api/tickets/32412/ticket-completion', data={
+        'day': 'today', 'ticket_kind': 'repair', 'idempotency_key': str(uuid4()), 'techportal_text': ' ',
+    })
+    assert empty.status_code == 422
+    assert empty.json()['detail'] == 'Опишите выполненные работы'
+    assert completion.begin_args is None
+
+    complete = client.post('/api/tickets/32412/ticket-completion', data={
+        'day': 'today', 'ticket_kind': 'repair', 'idempotency_key': str(uuid4()),
+        'techportal_text': 'Заменили кабель',
+    })
+    assert complete.status_code == 200
+    assert completion.begin_args[1]['ticket_kind'] == 'repair'
+    assert completion.begin_args[1]['techportal_text'] == 'Заменили кабель'
 
 
 def test_connection_completion_rejects_empty_report_before_service():

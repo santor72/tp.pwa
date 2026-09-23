@@ -41,10 +41,19 @@ class FakeTickets:
     async def assert_connection_assigned(self, user_id, day, ticket_id):
         self.asserted.append((user_id, day, ticket_id))
 
+    async def assert_ticket_assigned(self, user_id, day, ticket_id, ticket_kind):
+        self.asserted.append((user_id, day, ticket_id))
+
     async def mark_connection_completed(self, user_id, day, ticket_id, comment):
         self.marked.append((user_id, day, ticket_id, comment))
 
+    async def mark_ticket_completed(self, user_id, day, ticket_id, comment, ticket_kind):
+        self.marked.append((user_id, day, ticket_id, comment))
+
     async def connection_completion_recorded(self, user_id, ticket_id, comment):
+        return self.recorded
+
+    async def ticket_completion_recorded(self, user_id, ticket_id, comment, ticket_kind):
         return self.recorded
 
 
@@ -94,6 +103,36 @@ class FakeGis:
 
 def service(*, gis=None):
     return ConnectionCompletionService(FakeRepository(), FakeTickets(), FakeStorage(), gis or FakeGis())
+
+
+@pytest.mark.asyncio
+async def test_repair_requires_text_even_with_photo_before_creating_operation():
+    subject = service()
+    actor = Actor(user_id=uuid4(), techportal_user_id='17', channel='pwa')
+
+    with pytest.raises(ApiError) as error:
+        await subject.begin(actor, ticket_id=12, ticket_kind='repair', day='today', idempotency_key=uuid4(),
+                            techportal_text='', gis_text='', feature_id=None, technician_name='Иван',
+                            photos=[{'name': 'work.jpg', 'content_type': 'image/jpeg', 'content': b'photo'}])
+
+    assert error.value.code == 'REPAIR_COMMENT_REQUIRED'
+    assert subject._repository.rows == {}
+
+
+@pytest.mark.asyncio
+async def test_repair_uses_same_photo_and_gis_delivery_as_connection():
+    subject = service()
+    actor = Actor(user_id=uuid4(), techportal_user_id='17', channel='pwa')
+    operation = await subject.begin(actor, ticket_id=12, ticket_kind='repair', day='today', idempotency_key=uuid4(),
+                                    techportal_text='Заменили кабель', gis_text='Заменили кабель', feature_id=uuid4(),
+                                    technician_name='Иван', photos=[{'name': 'work.jpg', 'content_type': 'image/jpeg', 'content': b'photo'}])
+    operation = await subject.mark_techportal(operation.id)
+
+    assert operation.ticket_kind == 'repair'
+    assert operation.completion_status == 'completed'
+    assert operation.gis_status == 'delivered'
+    assert subject._tickets.marked[0][3].startswith('Иван\nЗаменили кабель\nhttps://photos.example/')
+    assert subject._gis.reports[0][1] == [('work.jpg', b'photo', 'image/jpeg')]
 
 
 @pytest.mark.asyncio
