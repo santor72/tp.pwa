@@ -10,11 +10,13 @@ def gis_visible_for_techportal_role(status: str | None, roles: str) -> bool:
 
 
 def capabilities_for(role: UserRole, permissions: dict, messenger_show: bool, *, techportal_status: str | None = None,
-                     gis_visible_techportal_roles: str = '', connection_photos: bool = False) -> Capabilities:
+                     gis_visible_techportal_roles: str = '', connection_photos: bool = False,
+                     gis_photos: bool = False) -> Capabilities:
     return Capabilities(
         payments=has_permission(permissions, "tickets", "execution"),
         gis=gis_visible_for_techportal_role(techportal_status, gis_visible_techportal_roles),
         connection_photos=connection_photos,
+        gis_photos=gis_photos,
         messenger_settings=messenger_show or role is UserRole.ADMIN,
         all_tickets=role in {UserRole.ADMIN, UserRole.MANAGER},
         payment_admin=role is UserRole.ADMIN,

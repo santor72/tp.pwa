@@ -40,9 +40,12 @@ async def complete_connection(
         raise ApiError(422, 'VALIDATION_ERROR', 'Укажите день заявки')
     if len(photos) > 5:
         raise ApiError(422, 'REPORT_PHOTOS_LIMIT', 'В одном отчёте можно загрузить до 5 фотографий')
-    if photos and not settings.connection_photos_enabled:
-        raise ApiError(503, 'S3_NOT_CONFIGURED', 'Загрузка фотографий для заявок не настроена')
-    if not techportal_report_text and not photos:
+    completion_service = request.app.state.connection_completion_service
+    if photos and not completion_service.photos_available and not feature_id:
+        raise ApiError(503, 'PHOTO_STORAGE_NOT_CONFIGURED', 'Загрузка фотографий для заявок не настроена')
+    if feature_id and photos and not completion_service.gis_photos_available:
+        raise ApiError(503, 'GIS_PHOTO_STORAGE_NOT_CONFIGURED', 'Для отправки фотографий в GIS требуется настроенное S3-хранилище')
+    if not techportal_report_text and not (photos and completion_service.photos_available):
         raise ApiError(422, 'CONNECTION_REPORT_REQUIRED', 'Добавьте текст для ТехПортала или фотографию')
     if feature_id and not gis_report_text and not photos:
         raise ApiError(422, 'GIS_REPORT_REQUIRED', 'Добавьте текст отчёта GIS или фотографию')
@@ -62,6 +65,7 @@ async def complete_connection(
         actor, ticket_id=ticket_id, day=day, idempotency_key=idempotency_key,
         techportal_text=techportal_report_text, gis_text=gis_report_text, feature_id=feature_id,
         photos=payload_photos, technician_name=technician_name, technician_last_name=technician_last_name,
+        upstream_cookies=session.upstream_cookies,
     )
     operation = await request.app.state.connection_completion_service.mark_techportal(operation.id)
     return response(operation)

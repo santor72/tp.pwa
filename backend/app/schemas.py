@@ -41,6 +41,7 @@ class Capabilities(BaseModel):
     payments: bool = False
     gis: bool = False
     connection_photos: bool = False
+    gis_photos: bool = False
     messenger_settings: bool = False
     all_tickets: bool = False
     payment_admin: bool = False

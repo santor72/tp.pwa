@@ -19,9 +19,11 @@ from app.payments import PaymentService
 from app.messenger_links import MessengerLinkService
 from app.repositories import PaymentRepository, SqlAlchemyMessengerRepository
 from app.techportal_client import TechPortalClient
+from app.techportal_photo_adapter import TechPortalPhotoAdapter
 from app.tickets import TicketService
 from app.gis_client import GisClient
 from app.object_storage import ObjectStorage
+from app.techportal_photo_delivery import TechPortalPhotoDelivery
 from app.completion_repository import CompletionRepository
 from app.completion_service import ConnectionCompletionService
 
@@ -59,9 +61,12 @@ def create_application_services(settings: Settings, cache_redis: Redis) -> Appli
     bitrix.limiter = PaymentRequestLimiter(events, settings)
     payment_catalog = PaymentProductCatalog(settings, bitrix, cache)
     resolver = PaymentClientResolver(settings, bitrix)
-    ticket_service = TicketService(settings, TechPortalClient(settings), cache)
+    techportal_client = TechPortalClient(settings)
+    ticket_service = TicketService(settings, techportal_client, cache)
     gis_client = GisClient(settings)
     completion_repository = CompletionRepository(sessions)
+    s3_storage = ObjectStorage()
+    photo_delivery = TechPortalPhotoDelivery([s3_storage, TechPortalPhotoAdapter(techportal_client)])
     return ApplicationServices(
         engine=engine,
         sessions=sessions,
@@ -76,5 +81,5 @@ def create_application_services(settings: Settings, cache_redis: Redis) -> Appli
         messenger_links=MessengerLinkService(sessions, settings.tg_link_token_ttl_seconds, SqlAlchemyMessengerRepository()),
         gis_client=gis_client,
         completion_repository=completion_repository,
-        connection_completion_service=ConnectionCompletionService(completion_repository, ticket_service, ObjectStorage(settings), gis_client),
+        connection_completion_service=ConnectionCompletionService(completion_repository, ticket_service, s3_storage, gis_client, photo_delivery),
     )

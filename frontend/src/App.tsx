@@ -756,6 +756,7 @@ function TicketDetails({
   onCompleteConnection,
   gisAllowed,
   connectionPhotosAllowed,
+  gisPhotosAllowed,
 }: {
   ticket: Ticket
   busy: boolean
@@ -767,6 +768,7 @@ function TicketDetails({
   onCompleteConnection: (techportalText: string, gisText: string, photos: File[], featureId: string | undefined, idempotencyKey: string) => Promise<ConnectionCompletion>
   gisAllowed: boolean
   connectionPhotosAllowed: boolean
+  gisPhotosAllowed: boolean
 }) {
   const [techportalText, setTechportalText] = useState('')
   const [gisText, setGisText] = useState('')
@@ -776,8 +778,12 @@ function TicketDetails({
   const [completionError, setCompletionError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const completionIdempotencyKey = useRef(createUuid())
+  const photosForTechPortal = connectionPhotosAllowed && photos.length > 0
   const needsComment = ticket.kind === 'repair' && !ticket.completed
   const isConnectionReport = ticket.kind === 'connection' && !ticket.completed
+  useEffect(() => {
+    if (!connectionPhotosAllowed && !featureId) setPhotos([])
+  }, [connectionPhotosAllowed, featureId])
   useEffect(() => {
     const operationId = sessionStorage.getItem(connectionCompletionKey(ticket.id))
     if (!operationId) return
@@ -798,8 +804,9 @@ function TicketDetails({
   async function submitConnection() {
     const portalText = techportalText.trim()
     const mapText = gisText.trim()
-    if (!portalText && !photos.length) { setCompletionError('Добавьте текст для ТехПортала или фотографию'); return }
+    if (!portalText && !photosForTechPortal) { setCompletionError('Добавьте текст для ТехПортала или фотографию'); return }
     if (featureId.trim() && !mapText && !photos.length) { setCompletionError('Добавьте текст отчёта GIS или фотографию'); return }
+    if (featureId.trim() && photos.length && !gisPhotosAllowed) { setCompletionError('Для отправки фотографий в GIS требуется настроенное S3-хранилище'); return }
     setSubmitting(true); setCompletionError('')
     try {
       setCompletion(await onCompleteConnection(portalText, mapText, photos, featureId.trim() || undefined, completionIdempotencyKey.current))
@@ -838,9 +845,9 @@ function TicketDetails({
         {editable && needsComment && <Field label="Что выполнено" required><textarea aria-label="Что выполнено" value={techportalText} onChange={event => setTechportalText(event.target.value)} rows={4} placeholder="Опишите выполненные работы" /></Field>}
         {editable && isConnectionReport && <>
           <Field label="Отчёт для ТехПортала" required={!connectionPhotosAllowed}><textarea aria-label="Отчёт для ТехПортала" value={techportalText} onChange={event => setTechportalText(event.target.value)} rows={3} placeholder="Комментарий о выполненных работах" /></Field>
-          {connectionPhotosAllowed && <Field label="Фотографии"><input aria-label="Фотографии выполнения" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" multiple onChange={event => setPhotos(Array.from(event.target.files ?? []))} /></Field>}
           {gisAllowed && <div className="field"><span>Объект GIS — необязательно</span><GisFeaturePicker value={featureId} onChange={setFeatureId} /></div>}
-          {featureId && <Field label="Отчёт для GIS" required={!connectionPhotosAllowed}><textarea aria-label="Отчёт для GIS" value={gisText} onChange={event => setGisText(event.target.value)} rows={3} placeholder="Описание для отчёта GIS" /></Field>}
+          {(connectionPhotosAllowed || (featureId && gisPhotosAllowed)) && <Field label={connectionPhotosAllowed ? 'Фотографии' : 'Фотографии для GIS'}><input aria-label="Фотографии выполнения" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" multiple onChange={event => setPhotos(Array.from(event.target.files ?? []))} /></Field>}
+          {featureId && <Field label="Отчёт для GIS" required={!gisPhotosAllowed}><textarea aria-label="Отчёт для GIS" value={gisText} onChange={event => setGisText(event.target.value)} rows={3} placeholder="Описание для отчёта GIS" /></Field>}
           {completionError && <ErrorBox text={completionError} />}
         </>}
         {completionNotice && <div className={completion?.completion_status === 'completed' ? 'success-box' : 'error-box'}>{completionNotice}</div>}
@@ -993,6 +1000,7 @@ function Tickets({ day, session }: { day: TicketDay; session: Session }) {
           }}
           gisAllowed={session.capabilities.gis}
           connectionPhotosAllowed={session.capabilities.connection_photos}
+          gisPhotosAllowed={session.capabilities.gis_photos}
         />
       </>
     )

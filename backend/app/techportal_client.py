@@ -28,6 +28,10 @@ class TechPortalClient:
         self._settings = settings
         self._transport = transport
 
+    @property
+    def user_api_available(self) -> bool:
+        return bool(self._settings.tp_origin_url)
+
     async def tickets(
         self,
         user_id: int | str | None,
@@ -151,6 +155,47 @@ class TechPortalClient:
             raise TechPortalAuthError()
         if response.is_error:
             raise TechPortalCallError()
+
+    async def upload_ticket_file(self, ticket_id: int, filename: str, content: bytes,
+                                 content_type: str, cookies: dict[str, str]) -> None:
+        """Upload with the employee's session, using the origin API and a fresh CSRF token."""
+        if not cookies:
+            raise TechPortalAuthError()
+        headers = {
+            'Accept': 'application/json, text/plain, */*',
+            'Referer': f'{self._settings.tp_origin_url}/',
+        }
+        try:
+            async with httpx.AsyncClient(
+                timeout=self._settings.tp_api_timeout_seconds,
+                transport=self._transport,
+                cookies=cookies,
+            ) as client:
+                csrf_response = await client.get(f'{self._settings.tp_origin_url}/csrf-token', headers=headers)
+                if csrf_response.status_code in {401, 403}:
+                    raise TechPortalAuthError()
+                csrf_response.raise_for_status()
+                try:
+                    csrf_token = csrf_response.json().get('_csrf')
+                except ValueError as exc:
+                    raise TechPortalResponseError() from exc
+                if not isinstance(csrf_token, str) or not csrf_token:
+                    raise TechPortalResponseError()
+                response = await client.post(
+                    f'{self._settings.tp_origin_url}/api/tickets/upload-file',
+                    headers={**headers, 'X-CSRF-Token': csrf_token},
+                    data={'ticketId': str(ticket_id)},
+                    files={'fileToUpload': (filename, content, content_type)},
+                )
+        except (TechPortalAuthError, TechPortalResponseError):
+            raise
+        except httpx.HTTPError as exc:
+            logger.warning('ТехПортал недоступен', extra={'event': 'techportal.upload.unavailable', 'fields': {'error': type(exc).__name__}})
+            raise ServiceUnavailableError('ТехПортал временно недоступен') from exc
+        if response.status_code in {401, 403}:
+            raise TechPortalAuthError()
+        if response.is_error or response.is_redirect:
+            raise TechPortalCallError('Не удалось загрузить файл в ТехПортал')
 
     async def _request(self, method: str, endpoint: str, **kwargs: Any) -> Any:
         url = f"{self._settings.tp_base_url.rstrip('/')}/{endpoint.lstrip('/')}"

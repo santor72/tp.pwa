@@ -201,11 +201,12 @@ async def login(payload: LoginRequest, response: Response, request: Request) -> 
     )
     set_session_cookie(response, session_id)
     audit(logger, "auth.login.succeeded", user_id=authenticated.user.id, result="success", session_hash=stable_hash(session_id))
-    return SessionResponse(payment_telemetry_enabled=settings.payment_telemetry_enabled, user=authenticated.user, csrf_token=session.csrf_token, capabilities=capabilities_for(authenticated.user.role, authenticated.user.user_permissions, settings.messenger_show, techportal_status=authenticated.user.status, gis_visible_techportal_roles=settings.gis_visible_techportal_roles, connection_photos=settings.connection_photos_enabled))
+    return SessionResponse(payment_telemetry_enabled=settings.payment_telemetry_enabled, user=authenticated.user, csrf_token=session.csrf_token, capabilities=capabilities_for(authenticated.user.role, authenticated.user.user_permissions, settings.messenger_show, techportal_status=authenticated.user.status, gis_visible_techportal_roles=settings.gis_visible_techportal_roles, connection_photos=request.app.state.connection_completion_service.photos_available, gis_photos=request.app.state.connection_completion_service.gis_photos_available))
 
 
 @app.get("/api/auth/session", response_model=SessionResponse)
 async def get_session(
+    request: Request,
     session_pair: tuple[str, object] = Depends(require_session),
     settings: Settings = Depends(get_settings),
 ) -> SessionResponse:
@@ -214,7 +215,7 @@ async def get_session(
         user=session.user,
         payment_telemetry_enabled=settings.payment_telemetry_enabled,
         csrf_token=session.csrf_token,
-        capabilities=capabilities_for(session.user.role, session.user.user_permissions, settings.messenger_show, techportal_status=session.user.status, gis_visible_techportal_roles=settings.gis_visible_techportal_roles, connection_photos=settings.connection_photos_enabled),
+        capabilities=capabilities_for(session.user.role, session.user.user_permissions, settings.messenger_show, techportal_status=session.user.status, gis_visible_techportal_roles=settings.gis_visible_techportal_roles, connection_photos=request.app.state.connection_completion_service.photos_available, gis_photos=request.app.state.connection_completion_service.gis_photos_available),
     )
 
 

@@ -6,7 +6,8 @@ import pytest
 
 from app.actors import Actor
 from app.completion_service import ConnectionCompletionService
-from app.errors import ServiceUnavailableError
+from app.errors import ApiError, ServiceUnavailableError
+from app.techportal_photo_delivery import PhotoSaveResult, TechPortalPhotoDelivery
 
 
 class FakeRepository:
@@ -48,12 +49,23 @@ class FakeTickets:
 
 
 class FakeStorage:
+    name = 's3'
+    configured = True
+
     def __init__(self):
         self.objects = {}
 
     async def put(self, key, content, content_type):
         self.objects[key] = content
         return f'https://photos.example/{key}'
+
+    async def save_photo(self, key, content, content_type, *, filename, context):
+        url = await self.put(key, content, content_type)
+        return PhotoSaveResult(comment_text=url, metadata={'key': key, 'public_url': url})
+
+    async def stage_for_gis(self, key, content, content_type):
+        self.objects[key] = content
+        return {'key': key}
 
     async def get(self, key):
         return self.objects[key]
@@ -97,6 +109,188 @@ async def test_connection_completion_adds_s3_links_to_techportal_comment_without
     assert operation.gis_status == 'not_requested'
     assert subject._tickets.marked == [('17', 'today', 12, f'Иван Иванов\nВ ТехПортал\nhttps://photos.example/{operation.photos[0]["key"]}')]
     assert subject._gis.reports == []
+
+
+@pytest.mark.asyncio
+async def test_connection_completion_adds_text_from_each_configured_adapter():
+    class ExtraAdapter:
+        name = 'extra'
+        configured = True
+
+        async def save_photo(self, key, content, content_type, *, filename, context):
+            return PhotoSaveResult(comment_text='Файл во втором хранилище')
+
+    subject = service()
+    subject._photo_delivery = TechPortalPhotoDelivery([subject._storage, ExtraAdapter()])
+    actor = Actor(user_id=uuid4(), techportal_user_id='17', channel='pwa')
+    operation = await subject.begin(actor, ticket_id=12, day='today', idempotency_key=uuid4(),
+                                    techportal_text='Работа выполнена', gis_text='', feature_id=None,
+                                    technician_name='Иван', photos=[{
+                                        'name': 'work.jpg', 'content_type': 'image/jpeg', 'content': b'photo',
+                                    }])
+    await subject.mark_techportal(operation.id)
+
+    assert subject._tickets.marked[0][3] == (
+        f'Иван\nРабота выполнена\nhttps://photos.example/{operation.photos[0]["key"]}'
+        '\nФайл во втором хранилище'
+    )
+    assert [copy['adapter'] for copy in operation.photos[0]['copies']] == ['s3', 'extra']
+
+
+@pytest.mark.asyncio
+async def test_techportal_upload_adapter_adds_no_file_text_to_comment_and_does_not_store_cookies():
+    class TicketUploadAdapter:
+        name = 'techportal'
+        configured = True
+
+        async def save_photo(self, key, content, content_type, *, filename, context):
+            assert context.ticket_id == 12
+            assert context.upstream_cookies == {'tp-session': 'employee'}
+            assert filename == 'work.jpg'
+            return PhotoSaveResult(comment_text='')
+
+    subject = service()
+    subject._photo_delivery = TechPortalPhotoDelivery([TicketUploadAdapter()])
+    actor = Actor(user_id=uuid4(), techportal_user_id='17', channel='pwa')
+    operation = await subject.begin(actor, ticket_id=12, day='today', idempotency_key=uuid4(),
+                                    techportal_text='Работа выполнена', gis_text='', feature_id=None,
+                                    technician_name='Иван', photos=[{
+                                        'name': 'work.jpg', 'content_type': 'image/jpeg', 'content': b'photo',
+                                    }], upstream_cookies={'tp-session': 'employee'})
+    await subject.mark_techportal(operation.id)
+
+    assert subject._tickets.marked[0][3] == 'Иван\nРабота выполнена'
+    assert operation.photos[0]['copies'] == [{'adapter': 'techportal', 'comment_text': ''}]
+    assert 'upstream_cookies' not in operation.__dict__
+
+
+@pytest.mark.asyncio
+async def test_techportal_photo_alone_can_complete_connection_without_report_text():
+    class TicketUploadAdapter:
+        name = 'techportal'
+        configured = True
+
+        async def save_photo(self, key, content, content_type, *, filename, context):
+            return PhotoSaveResult(comment_text='')
+
+    subject = service()
+    subject._photo_delivery = TechPortalPhotoDelivery([TicketUploadAdapter()])
+    actor = Actor(user_id=uuid4(), techportal_user_id='17', channel='pwa')
+    operation = await subject.begin(actor, ticket_id=12, day='today', idempotency_key=uuid4(),
+                                    techportal_text='', gis_text='', feature_id=None,
+                                    technician_name='Иван', photos=[{
+                                        'name': 'work.jpg', 'content_type': 'image/jpeg', 'content': b'photo',
+                                    }], upstream_cookies={'tp-session': 'employee'})
+    operation = await subject.mark_techportal(operation.id)
+
+    assert operation.completion_status == 'completed'
+    assert subject._tickets.marked[0][3] == 'Иван'
+
+
+@pytest.mark.asyncio
+async def test_gis_photos_require_the_s3_adapter_even_when_another_adapter_is_available():
+    class ExtraAdapter:
+        name = 'extra'
+        configured = True
+
+        async def save_photo(self, key, content, content_type, *, filename, context):
+            return PhotoSaveResult(comment_text='Фото сохранено')
+
+    subject = service()
+    subject._storage.configured = False
+    subject._photo_delivery = TechPortalPhotoDelivery([subject._storage, ExtraAdapter()])
+    assert subject.photos_available is True
+    assert subject.gis_photos_available is False
+    actor = Actor(user_id=uuid4(), techportal_user_id='17', channel='pwa')
+
+    with pytest.raises(ApiError) as error:
+        await subject.begin(actor, ticket_id=12, day='today', idempotency_key=uuid4(),
+                            techportal_text='ТП', gis_text='GIS', feature_id=uuid4(), technician_name='Иван',
+                            photos=[{'name': 'work.jpg', 'content_type': 'image/jpeg', 'content': b'photo'}])
+
+    assert error.value.code == 'GIS_PHOTO_STORAGE_NOT_CONFIGURED'
+    assert subject._repository.rows == {}
+
+
+@pytest.mark.asyncio
+async def test_gis_reads_s3_copy_when_another_adapter_writes_first():
+    class ExtraAdapter:
+        name = 'extra'
+        configured = True
+
+        async def save_photo(self, key, content, content_type, *, filename, context):
+            return PhotoSaveResult(comment_text='Другая ссылка', metadata={'key': 'extra-key'})
+
+    subject = service()
+    subject._photo_delivery = TechPortalPhotoDelivery([ExtraAdapter(), subject._storage])
+    actor = Actor(user_id=uuid4(), techportal_user_id='17', channel='pwa')
+    operation = await subject.begin(actor, ticket_id=12, day='today', idempotency_key=uuid4(),
+                                    techportal_text='ТП', gis_text='GIS', feature_id=uuid4(), technician_name='Иван',
+                                    photos=[{'name': 'work.jpg', 'content_type': 'image/jpeg', 'content': b'photo'}])
+    operation = await subject.mark_techportal(operation.id)
+
+    assert operation.gis_status == 'delivered'
+    assert subject._gis.reports[0][1] == [('work.jpg', b'photo', 'image/jpeg')]
+
+
+@pytest.mark.asyncio
+async def test_gis_only_s3_stores_photo_without_adding_link_to_techportal_comment():
+    subject = service()
+    subject._storage.techportal_enabled = False
+    assert subject.photos_available is False
+    assert subject.gis_photos_available is True
+    actor = Actor(user_id=uuid4(), techportal_user_id='17', channel='pwa')
+    operation = await subject.begin(actor, ticket_id=12, day='today', idempotency_key=uuid4(),
+                                    techportal_text='Подключили', gis_text='', feature_id=uuid4(),
+                                    technician_name='Иван', photos=[{
+                                        'name': 'work.jpg', 'content_type': 'image/jpeg', 'content': b'photo',
+                                    }])
+    operation = await subject.mark_techportal(operation.id)
+
+    assert operation.gis_status == 'delivered'
+    assert subject._tickets.marked[0][3] == 'Иван\nПодключили'
+    assert operation.photos[0]['copies'] == [{
+        'adapter': 's3', 'comment_text': '', 'key': operation.photos[0]['copies'][0]['key'],
+    }]
+    assert subject._gis.reports[0][1] == [('work.jpg', b'photo', 'image/jpeg')]
+
+
+@pytest.mark.asyncio
+async def test_gis_only_s3_stages_photo_after_other_techportal_adapter():
+    class ExtraAdapter:
+        name = 'extra'
+        configured = True
+
+        async def save_photo(self, key, content, content_type, *, filename, context):
+            return PhotoSaveResult(comment_text='Ссылка другого хранилища', metadata={'key': 'extra-key'})
+
+    subject = service()
+    subject._storage.techportal_enabled = False
+    subject._photo_delivery = TechPortalPhotoDelivery([subject._storage, ExtraAdapter()])
+    actor = Actor(user_id=uuid4(), techportal_user_id='17', channel='pwa')
+    operation = await subject.begin(actor, ticket_id=12, day='today', idempotency_key=uuid4(),
+                                    techportal_text='', gis_text='', feature_id=uuid4(), technician_name='Иван',
+                                    photos=[{'name': 'work.jpg', 'content_type': 'image/jpeg', 'content': b'photo'}])
+    operation = await subject.mark_techportal(operation.id)
+
+    assert operation.gis_status == 'delivered'
+    assert subject._tickets.marked[0][3] == 'Иван\nСсылка другого хранилища'
+    assert [copy['adapter'] for copy in operation.photos[0]['copies']] == ['extra', 's3']
+    assert subject._gis.reports[0][1] == [('work.jpg', b'photo', 'image/jpeg')]
+
+
+@pytest.mark.asyncio
+async def test_gis_only_s3_does_not_make_photos_a_techportal_report():
+    subject = service()
+    subject._storage.techportal_enabled = False
+    actor = Actor(user_id=uuid4(), techportal_user_id='17', channel='pwa')
+
+    with pytest.raises(ApiError) as error:
+        await subject.begin(actor, ticket_id=12, day='today', idempotency_key=uuid4(),
+                            techportal_text='', gis_text='GIS', feature_id=uuid4(), technician_name='Иван',
+                            photos=[{'name': 'work.jpg', 'content_type': 'image/jpeg', 'content': b'photo'}])
+
+    assert error.value.code == 'CONNECTION_REPORT_REQUIRED'
 
 
 @pytest.mark.asyncio

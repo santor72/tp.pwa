@@ -133,6 +133,43 @@ async def test_dial_uses_origin_api_path_and_accepts_empty_success_response() ->
 
 
 @pytest.mark.asyncio
+async def test_upload_file_uses_employee_cookies_csrf_and_multipart_ticket_fields() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == '/csrf-token':
+            assert request.headers['cookie'] == 'tp-session=employee-session'
+            return httpx.Response(200, json={'_csrf': 'employee-csrf'})
+        assert request.url == httpx.URL('https://tp.example/api/tickets/upload-file')
+        assert request.headers['cookie'] == 'tp-session=employee-session'
+        assert request.headers['X-CSRF-Token'] == 'employee-csrf'
+        assert 'Authorization' not in request.headers
+        assert request.headers['Content-Type'].startswith('multipart/form-data; boundary=')
+        assert b'name="ticketId"' in request.content
+        assert b'54295' in request.content
+        assert b'name="fileToUpload"' in request.content
+        assert b'Content-Type: image/png' in request.content
+        assert b'PNG-data' in request.content
+        return httpx.Response(200, text='+{"files":["2026-09-23/1790167317021-л1.png"]}')
+
+    result = await TechPortalClient(settings(), transport=httpx.MockTransport(handler)).upload_ticket_file(
+        54295, 'л1.png', b'PNG-data', 'image/png', {'tp-session': 'employee-session'},
+    )
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_upload_file_accepts_success_without_parseable_response_body() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == '/csrf-token':
+            return httpx.Response(200, json={'_csrf': 'employee-csrf'})
+        return httpx.Response(200, text='Файл сохранён')
+
+    await TechPortalClient(settings(), transport=httpx.MockTransport(handler)).upload_ticket_file(
+        54295, 'photo.png', b'PNG-data', 'image/png', {'tp-session': 'employee-session'},
+    )
+
+
+@pytest.mark.asyncio
 async def test_client_maps_configuration_auth_and_network_errors() -> None:
     with pytest.raises(TechPortalNotConfiguredError):
         await TechPortalClient(Settings(tp_base_token="")).users()

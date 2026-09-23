@@ -4,6 +4,8 @@ from app.dependencies import require_gis_access
 from app.errors import PermissionDeniedError
 from app.roles import UserRole
 from app.schemas import SessionData, UserProfile
+from app.object_storage import ObjectStorage, S3PhotoSettings
+from app.techportal_photo_delivery import TechPortalPhotoDelivery
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 import pytest
@@ -15,9 +17,9 @@ def test_capabilities_combine_role_configuration_and_techportal_permission() -> 
     user = capabilities_for(UserRole.USER, {}, False)
     visible_for_all = capabilities_for(UserRole.USER, {}, True)
 
-    assert admin.model_dump() == {"payments": True, "gis": False, "connection_photos": False, "messenger_settings": True, "all_tickets": True, "payment_admin": True}
-    assert manager.model_dump() == {"payments": False, "gis": False, "connection_photos": False, "messenger_settings": False, "all_tickets": True, "payment_admin": False}
-    assert user.model_dump() == {"payments": False, "gis": False, "connection_photos": False, "messenger_settings": False, "all_tickets": False, "payment_admin": False}
+    assert admin.model_dump() == {"payments": True, "gis": False, "connection_photos": False, "gis_photos": False, "messenger_settings": True, "all_tickets": True, "payment_admin": True}
+    assert manager.model_dump() == {"payments": False, "gis": False, "connection_photos": False, "gis_photos": False, "messenger_settings": False, "all_tickets": True, "payment_admin": False}
+    assert user.model_dump() == {"payments": False, "gis": False, "connection_photos": False, "gis_photos": False, "messenger_settings": False, "all_tickets": False, "payment_admin": False}
     assert visible_for_all.messenger_settings is True
 
 
@@ -30,11 +32,17 @@ def test_gis_capability_uses_the_configured_techportal_statuses() -> None:
 
 
 def test_connection_photo_capability_requires_full_s3_configuration() -> None:
-    assert Settings().connection_photos_enabled is False
-    assert Settings(
+    assert TechPortalPhotoDelivery([ObjectStorage(S3PhotoSettings())]).available is False
+    assert TechPortalPhotoDelivery([ObjectStorage(S3PhotoSettings(
         s3_endpoint_url='http://seaweedfs:8333', s3_access_key_id='access', s3_secret_access_key='secret',
         s3_bucket='reports', s3_public_base_url='https://files.example/reports',
-    ).connection_photos_enabled is True
+    ))]).available is True
+    gis_only = ObjectStorage(S3PhotoSettings(
+        s3_endpoint_url='http://seaweedfs:8333', s3_access_key_id='access', s3_secret_access_key='secret',
+        s3_bucket='reports', s3_photo_usage='gis_only',
+    ))
+    assert gis_only.configured is True
+    assert TechPortalPhotoDelivery([gis_only]).available is False
 
 
 def test_gis_backend_access_requires_a_configured_techportal_status() -> None:
