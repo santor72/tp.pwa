@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from 'react'
+import { CircleMarker, MapContainer, Polyline, TileLayer, useMap, useMapEvents } from 'react-leaflet'
 import { paymentCommands } from './paymentCommands'
 
 import {
@@ -1096,21 +1097,7 @@ function coordinatePairs(geometry: GisFeature['geometry']): [number, number][] {
 
 type GisBasemap = 'streets' | 'satellite' | 'none'
 type GisMapView = { longitude: number; latitude: number; zoom: number }
-const GIS_TILE_SIZE = 256
-const GIS_MAX_LATITUDE = 85.05112878
 const GIS_DEFAULT_ZOOM = 14
-
-function mapWorldPoint([longitude, latitude]: [number, number], zoom: number): [number, number] {
-  const size = GIS_TILE_SIZE * 2 ** zoom
-  const safeLatitude = Math.max(-GIS_MAX_LATITUDE, Math.min(GIS_MAX_LATITUDE, latitude))
-  const sin = Math.sin(safeLatitude * Math.PI / 180)
-  return [((longitude + 180) / 360) * size, (0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * size]
-}
-
-function mapCoordinates([x, y]: [number, number], zoom: number): [number, number] {
-  const size = GIS_TILE_SIZE * 2 ** zoom
-  return [x / size * 360 - 180, Math.atan(Math.sinh(Math.PI * (1 - 2 * y / size))) * 180 / Math.PI]
-}
 
 function initialMapView(coordinates: [number, number][]): GisMapView {
   const longitudes = coordinates.map(point => point[0]); const latitudes = coordinates.map(point => point[1])
@@ -1120,65 +1107,45 @@ function initialMapView(coordinates: [number, number][]): GisMapView {
   return { longitude, latitude, zoom: Math.max(8, Math.min(18, Math.floor(Math.log2(300 / span)))) }
 }
 
-function mapViewBounds(view: GisMapView, width: number, height: number): [number, number, number, number] {
-  const center = mapWorldPoint([view.longitude, view.latitude], Math.round(view.zoom))
-  const [west, north] = mapCoordinates([center[0] - width / 2, center[1] - height / 2], Math.round(view.zoom))
-  const [east, south] = mapCoordinates([center[0] + width / 2, center[1] + height / 2], Math.round(view.zoom))
-  return [west, south, east, north]
+function basemapTileUrl(basemap: GisBasemap): string | null {
+  if (basemap === 'none') return null
+  if (basemap === 'satellite') return 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+  return 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
 }
 
-function basemapTileUrl(basemap: GisBasemap, x: number, y: number, zoom: number): string | null {
-  if (basemap === 'none') return null
-  if (basemap === 'satellite') return `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zoom}/${y}/${x}`
-  return `https://${['a', 'b', 'c'][(x + y) % 3]}.tile.openstreetmap.org/${zoom}/${x}/${y}.png`
+function MapEvents({ view, onViewChange, onBoundsChange }: { view: GisMapView; onViewChange: (view: GisMapView) => void; onBoundsChange: (bounds: [number, number, number, number]) => void }) {
+  const map = useMap()
+  const reportView = useCallback(() => {
+    const center = map.getCenter()
+    const bounds = map.getBounds()
+    onViewChange({ longitude: center.lng, latitude: center.lat, zoom: map.getZoom() })
+    onBoundsChange([bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()])
+  }, [map, onBoundsChange, onViewChange])
+  useEffect(() => {
+    const center = map.getCenter()
+    if (Math.abs(center.lng - view.longitude) > 0.000001 || Math.abs(center.lat - view.latitude) > 0.000001 || map.getZoom() !== view.zoom) {
+      map.setView([view.latitude, view.longitude], view.zoom, { animate: false })
+    }
+  }, [map, view.latitude, view.longitude, view.zoom])
+  useEffect(() => { reportView() }, [reportView])
+  useMapEvents({ moveend: reportView })
+  return null
 }
 
 function MapCanvas({ data, position, view, onViewChange, onBoundsChange, onSelect, onLocate, locating }: { data: GisFeatureCollection | null; position: Position | null; view: GisMapView; onViewChange: (view: GisMapView) => void; onBoundsChange: (bounds: [number, number, number, number]) => void; onSelect: (feature: GisFeature) => void; onLocate: () => void; locating: boolean }) {
-  const coordinates = data?.features.flatMap(feature => coordinatePairs(feature.geometry)) ?? []
-  const mapRef = useRef<HTMLDivElement>(null)
-  const drag = useRef<{ x: number; y: number; view: GisMapView } | null>(null)
-  const [size, setSize] = useState({ width: 1000, height: 700 })
+  const features = data?.features ?? []
+  const coordinates = features.flatMap(feature => coordinatePairs(feature.geometry))
   const [basemap, setBasemap] = useState<GisBasemap>('streets')
-  useEffect(() => {
-    const element = mapRef.current
-    if (!element || typeof ResizeObserver === 'undefined') return
-    const observer = new ResizeObserver(([entry]) => setSize({ width: entry.contentRect.width, height: entry.contentRect.height }))
-    observer.observe(element)
-    return () => observer.disconnect()
-  }, [])
-  useEffect(() => { onBoundsChange(mapViewBounds(view, size.width, size.height)) }, [view, size.height, size.width, onBoundsChange])
-  const zoom = Math.round(view.zoom)
-  const center = mapWorldPoint([view.longitude, view.latitude], zoom)
-  const project = (point: [number, number]) => { const world = mapWorldPoint(point, zoom); return [world[0] - center[0] + size.width / 2, world[1] - center[1] + size.height / 2] as const }
-  const path = (feature: GisFeature) => coordinatePairs(feature.geometry).map((point, index) => `${index ? 'L' : 'M'}${project(point).join(' ')}`).join(' ')
-  const visible = (data?.features ?? []).filter(feature => coordinatePairs(feature.geometry).some(point => { const [x, y] = project(point); return x >= -80 && x <= size.width + 80 && y >= -80 && y <= size.height + 80 }))
-  const tiles: { x: number; y: number; left: number; top: number; url: string }[] = []
-  const tileCount = 2 ** zoom
-  for (let y = Math.max(0, Math.floor((center[1] - size.height / 2) / GIS_TILE_SIZE)); y <= Math.min(tileCount - 1, Math.floor((center[1] + size.height / 2) / GIS_TILE_SIZE)); y += 1) for (let sourceX = Math.floor((center[0] - size.width / 2) / GIS_TILE_SIZE); sourceX <= Math.floor((center[0] + size.width / 2) / GIS_TILE_SIZE); sourceX += 1) {
-    const x = (sourceX % tileCount + tileCount) % tileCount; const url = basemapTileUrl(basemap, x, y, zoom)
-    if (url) tiles.push({ x, y, left: sourceX * GIS_TILE_SIZE - center[0] + size.width / 2, top: y * GIS_TILE_SIZE - center[1] + size.height / 2, url })
-  }
   const setZoom = (delta: number) => onViewChange({ ...view, zoom: Math.max(3, Math.min(19, Math.round(view.zoom) + delta)) })
-  const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!drag.current) return
-    const startCenter = mapWorldPoint([drag.current.view.longitude, drag.current.view.latitude], zoom)
-    const [longitude, latitude] = mapCoordinates([startCenter[0] - event.clientX + drag.current.x, startCenter[1] - event.clientY + drag.current.y], zoom)
-    onViewChange({ ...view, longitude, latitude })
-  }
-  return <div ref={mapRef} className="gis-map-canvas" role="application" aria-label="Карта сети" onPointerDown={event => {
-    // Pointer capture turns a tap on an SVG marker into a click on the map
-    // container on touch devices. Keep object taps for their own handlers.
-    if ((event.target as Element).closest('.gis-point, .gis-line, .gis-polygon')) return
-    drag.current = { x: event.clientX, y: event.clientY, view }
-    event.currentTarget.setPointerCapture(event.pointerId)
-  }} onPointerMove={onPointerMove} onPointerUp={() => { drag.current = null }} onPointerCancel={() => { drag.current = null }} onWheel={event => { event.preventDefault(); setZoom(event.deltaY < 0 ? 1 : -1) }}>
-    <div className={`gis-basemap gis-basemap-${basemap}`}>{tiles.map(tile => <img key={`${zoom}-${tile.x}-${tile.y}-${tile.left}`} src={tile.url} alt="" draggable={false} style={{ left: tile.left, top: tile.top }} />)}</div>
-    <svg viewBox={`0 0 ${size.width} ${size.height}`} aria-hidden="true">
-      {visible.filter(feature => feature.geometry.type === 'Polygon').map(feature => <path key={feature.id} d={`${path(feature)} Z`} className="gis-polygon" onClick={() => onSelect(feature)} />)}
-      {visible.filter(feature => feature.geometry.type === 'LineString').map(feature => <path key={feature.id} d={path(feature)} className="gis-line" style={{ stroke: feature.properties.lineColor || '#2563eb' }} onClick={() => onSelect(feature)} />)}
-      {visible.filter(feature => feature.geometry.type === 'Point').map(feature => { const [x, y] = project(feature.geometry.coordinates as [number, number]); return <g key={feature.id} className="gis-point" onClick={() => onSelect(feature)}><circle cx={x} cy={y} r="11" style={{ fill: feature.properties.iconColor || '#0288d1' }} /><circle cx={x} cy={y} r="4" /></g> })}
-      {position && (() => { const [x, y] = project([position.longitude, position.latitude]); return <g className="gis-position"><circle cx={x} cy={y} r="25" /><circle cx={x} cy={y} r="9" /></g> })()}
-    </svg>
+  const tileUrl = basemapTileUrl(basemap)
+  return <div className="gis-map-canvas" role="application" aria-label="Карта сети">
+    <MapContainer center={[view.latitude, view.longitude]} zoom={view.zoom} zoomControl={false} scrollWheelZoom className="gis-leaflet-map">
+      <MapEvents view={view} onViewChange={onViewChange} onBoundsChange={onBoundsChange} />
+      {tileUrl && <TileLayer url={tileUrl} attribution={basemap === 'streets' ? '&copy; OpenStreetMap' : 'Tiles &copy; Esri'} />}
+      {features.filter(feature => feature.geometry.type === 'LineString').map(feature => <Polyline key={feature.id} positions={coordinatePairs(feature.geometry).map(([longitude, latitude]) => [latitude, longitude] as [number, number])} pathOptions={{ color: feature.properties.lineColor || '#2563eb', weight: 5, lineCap: 'round', lineJoin: 'round' }} eventHandlers={{ click: () => onSelect(feature) }} />)}
+      {features.filter(feature => feature.geometry.type === 'Point').map(feature => { const [longitude, latitude] = feature.geometry.coordinates as [number, number]; return <CircleMarker key={feature.id} center={[latitude, longitude]} radius={11} pathOptions={{ color: 'white', weight: 3, fillColor: feature.properties.iconColor || '#0288d1', fillOpacity: 1 }} eventHandlers={{ click: () => onSelect(feature) }} /> })}
+      {position && <CircleMarker center={[position.latitude, position.longitude]} radius={9} pathOptions={{ color: 'white', weight: 3, fillColor: '#2563eb', fillOpacity: 1 }} />}
+    </MapContainer>
     <div className="gis-map-controls" onPointerDown={event => event.stopPropagation()}>
       <button type="button" onClick={() => setZoom(1)} aria-label="Увеличить масштаб">+</button>
       <button type="button" onClick={() => setZoom(-1)} aria-label="Уменьшить масштаб">−</button>
@@ -1186,7 +1153,6 @@ function MapCanvas({ data, position, view, onViewChange, onBoundsChange, onSelec
       <button type="button" onClick={() => coordinates.length && onViewChange(initialMapView(coordinates))} disabled={!coordinates.length} aria-label="Показать загруженные объекты">⌂</button>
     </div>
     <label className="gis-basemap-picker" onPointerDown={event => event.stopPropagation()}><span>Подложка</span><select value={basemap} onChange={event => setBasemap(event.target.value as GisBasemap)} aria-label="Подложка карты"><option value="streets">Схема</option><option value="satellite">Спутник</option><option value="none">Без подложки</option></select></label>
-    {basemap !== 'none' && <small className="gis-attribution">{basemap === 'streets' ? '© OpenStreetMap' : 'Tiles © Esri'}</small>}
   </div>
 }
 

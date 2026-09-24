@@ -9,6 +9,7 @@ from app.report_photos import MAX_PHOTO_BYTES, validate_report_photo
 from app.schemas import SessionData
 
 router = APIRouter(prefix='/api/gis', tags=['gis'])
+DRAWABLE_GEOMETRIES = {'Point', 'LineString'}
 
 
 @router.get('/maps')
@@ -28,7 +29,19 @@ async def bounds(map_id: UUID, request: Request, _: tuple[str, SessionData] = De
 
 @router.get('/maps/{map_id}/features')
 async def features(map_id: UUID, request: Request, bbox: str = Query(pattern=r'^-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?$'), layers: str | None = Query(default=None, max_length=2048), _: tuple[str, SessionData] = Depends(require_gis_session)):
-    return await request.app.state.gis_client.features(str(map_id), bbox=bbox, layers=layers)
+    result = await request.app.state.gis_client.features(str(map_id), bbox=bbox, layers=layers)
+    features = result.get('features')
+    if isinstance(features, list):
+        result = {
+            **result,
+            'features': [
+                feature for feature in features
+                if isinstance(feature, dict)
+                and isinstance(feature.get('geometry'), dict)
+                and feature['geometry'].get('type') in DRAWABLE_GEOMETRIES
+            ],
+        }
+    return result
 
 
 @router.get('/maps/{map_id}/search')

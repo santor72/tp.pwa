@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from app.dependencies import require_gis_csrf
+from app.dependencies import require_gis_csrf, require_gis_session
 from app.routers.gis import router
 from app.schemas import SessionData, UserProfile
 
@@ -21,6 +21,18 @@ class CapturingGisClient:
     def __init__(self) -> None:
         self.metadata = None
         self.photos = None
+        self.feature_calls = []
+
+    async def features(self, map_id, *, bbox, layers):
+        self.feature_calls.append((map_id, bbox, layers))
+        return {
+            'type': 'FeatureCollection', 'truncated': False, 'limit': 100,
+            'features': [
+                {'type': 'Feature', 'id': 'point', 'geometry': {'type': 'Point', 'coordinates': [37.2, 55.1]}},
+                {'type': 'Feature', 'id': 'line', 'geometry': {'type': 'LineString', 'coordinates': [[37.2, 55.1], [37.3, 55.2]]}},
+                {'type': 'Feature', 'id': 'polygon', 'geometry': {'type': 'Polygon', 'coordinates': [[[37.2, 55.1], [37.3, 55.2], [37.2, 55.1]]]}},
+            ],
+        }
 
     async def create_report(self, metadata, photos):
         self.metadata = metadata
@@ -66,3 +78,23 @@ def test_map_report_uses_server_author_and_reserved_ticket_id():
     assert gis.photos[0][0] == 'work.jpg'
     assert gis.photos[0][2] == 'image/jpeg'
     assert gis.photos[0][1].startswith(b'\xff\xd8\xff')
+
+
+def test_features_excludes_polygons_before_returning_to_browser():
+    app = FastAPI()
+    gis = CapturingGisClient()
+    app.state.gis_client = gis
+    app.include_router(router)
+
+    async def session_override():
+        return 'session', None
+
+    app.dependency_overrides[require_gis_session] = session_override
+    map_id = uuid4()
+    response = TestClient(app).get(f'/api/gis/maps/{map_id}/features', params={
+        'bbox': '37.1,55.0,37.4,55.3', 'layers': 'layer-1',
+    })
+
+    assert response.status_code == 200
+    assert [feature['id'] for feature in response.json()['features']] == ['point', 'line']
+    assert gis.feature_calls == [(str(map_id), '37.1,55.0,37.4,55.3', 'layer-1')]

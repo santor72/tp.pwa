@@ -204,24 +204,15 @@ input:focus, textarea:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px #dbea
 .gis-layers { display: flex; flex-wrap: wrap; gap: .5rem; padding: 0 .65rem .65rem; }
 .gis-layers label { display: inline-flex; align-items: center; gap: .4rem; padding: .45rem .65rem; border: 1px solid #dbe2ea; border-radius: .7rem; color: #334155; background: white; font-size: .82rem; }
 .gis-layers input { width: 1rem; height: 1rem; }
-.gis-map-canvas { position: relative; min-height: 23rem; overflow: hidden; border: 1px solid #bfdbfe; border-radius: 1.2rem; background: #e0f2fe; box-shadow: 0 8px 30px #0f172a12; touch-action: none; user-select: none; }
-.gis-map-canvas svg { position: relative; z-index: 2; display: block; width: 100%; height: 100%; min-height: 23rem; overflow: visible; }
-.gis-basemap { position: absolute; inset: 0; z-index: 1; overflow: hidden; background: #e2e8f0; }
-.gis-basemap-none { background-color: #eff6ff; background-image: linear-gradient(#bfdbfe 1px, transparent 1px), linear-gradient(90deg, #bfdbfe 1px, transparent 1px); background-size: 48px 48px; }
-.gis-basemap img { position: absolute; display: block; width: 256px; height: 256px; max-width: none; pointer-events: none; }
+.gis-map-canvas { position: relative; min-height: 23rem; overflow: hidden; border: 1px solid #bfdbfe; border-radius: 1.2rem; background: #e0f2fe; box-shadow: 0 8px 30px #0f172a12; user-select: none; }
+.gis-leaflet-map { height: 23rem; min-height: 23rem; }
 .gis-map-controls { position: absolute; z-index: 3; top: .8rem; left: .8rem; display: grid; overflow: hidden; border: 1px solid #cbd5e1; border-radius: .65rem; background: #fffffff2; box-shadow: 0 3px 10px #0f172a25; }
 .gis-map-controls button { width: 2.5rem; height: 2.35rem; padding: 0; border: 0; border-bottom: 1px solid #dbe2ea; border-radius: 0; color: #0f172a; background: transparent; font-size: 1.5rem; font-weight: 700; line-height: 1; }
 .gis-map-controls button:last-child { border-bottom: 0; font-size: 1.35rem; }
 .gis-map-controls button:disabled { color: #94a3b8; }
 .gis-basemap-picker { position: absolute; z-index: 3; top: .8rem; right: .8rem; display: grid; gap: .15rem; padding: .45rem .55rem; border: 1px solid #cbd5e1; border-radius: .65rem; color: #334155; background: #fffffff2; box-shadow: 0 3px 10px #0f172a25; font-size: .72rem; }
 .gis-basemap-picker select { min-width: 7.6rem; padding: .25rem .35rem; border: 0; border-radius: .3rem; color: #0f172a; background: transparent; font-size: .82rem; }
-.gis-attribution { position: absolute; z-index: 3; right: .45rem; bottom: .3rem; padding: .12rem .25rem; color: #334155; background: #ffffffcc; font-size: .65rem; pointer-events: none; }
-.gis-polygon { fill: #a7f3d066; stroke: #059669; stroke-width: 3; cursor: pointer; }
-.gis-line { fill: none; stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; cursor: pointer; }
-.gis-point { cursor: pointer; stroke: white; stroke-width: 3; }
-.gis-point circle:last-child { fill: white; stroke: none; }
-.gis-position circle:first-child { fill: #2563eb33; stroke: #2563eb; stroke-width: 2; }
-.gis-position circle:last-child { fill: #2563eb; stroke: white; stroke-width: 3; }
+.gis-leaflet-map .leaflet-control-attribution { font-size: .65rem; }
 .gis-feature-backdrop { position: fixed; z-index: 35; inset: 0; display: flex; align-items: end; justify-content: center; padding: 1rem; background: #0f172a66; }
 .gis-feature-card { width: min(100%, 42rem); max-height: min(78dvh, 42rem); overflow: auto; padding: .7rem 1rem calc(1.15rem + env(safe-area-inset-bottom)); border-radius: 1.15rem 1.15rem .8rem .8rem; background: white; box-shadow: 0 -12px 35px #0f172a45; }
 .gis-feature-handle { width: 2.6rem; height: .28rem; margin: 0 auto .8rem; border-radius: 99px; background: #cbd5e1; }
