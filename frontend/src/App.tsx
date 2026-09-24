@@ -738,7 +738,6 @@ function GisFeaturePicker({ value, onChange }: { value: string; onChange: (value
           <header><div><small>{selectedLayer}</small><h3>{details?.title || selectedTitle}</h3></div><button type="button" onClick={() => setSelected(null)} aria-label="Вернуться к карте">×</button></header>
           {detailsLoading && <p className="gis-feature-loading">Загружаем карточку объекта…</p>}
           {detailsError && <ErrorBox text={detailsError} />}
-          {details && <dl className="gis-feature-details"><div><dt>Тип</dt><dd>{details.kind}</dd></div>{details.number !== null && <div><dt>Номер</dt><dd>{details.number}</dd></div>}</dl>}
           <div className="gis-picker-actions"><button type="button" className="outline-button" onClick={() => setSelected(null)}>Назад к карте</button><button type="button" className="primary-button" onClick={() => { onChange(selected.id); closePicker() }}>Выбрать этот объект</button></div>
         </section>}
       </aside>
@@ -1230,8 +1229,6 @@ function GisReportForm({ featureId, csrfToken }: { featureId: string; csrfToken:
 function GisFeatureCard({ feature, details, loading, error, csrfToken, onClose }: { feature: GisFeature | null; details: GisFeatureDetails | null; loading: boolean; error: string; csrfToken: string; onClose: () => void }) {
   if (!feature) return null
   const detailRows = details ? [
-    ['Тип', details.kind],
-    ['Номер', details.number],
     [details.geometry.type === 'Point' ? 'Координаты' : 'Длина', objectGeometryLabel(details)],
     ['Версия', details.version],
   ].filter(([, value]) => value !== null && value !== undefined && String(value).trim() !== '') : []
