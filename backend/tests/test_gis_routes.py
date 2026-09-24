@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from app.dependencies import require_gis_csrf, require_gis_session
+from app.config import Settings, get_settings
 from app.routers.gis import router
 from app.schemas import SessionData, UserProfile
 
@@ -99,3 +100,22 @@ def test_features_keeps_all_supported_geojson_geometries():
     assert response.status_code == 200
     assert [feature['id'] for feature in response.json()['features']] == ['point', 'line', 'polygon']
     assert gis.feature_calls == [(str(map_id), '37.1,55.0,37.4,55.3', 'layer-1')]
+
+
+def test_basemap_returns_official_sdk_url_only_when_key_is_configured():
+    app = FastAPI()
+    app.include_router(router)
+
+    async def session_override():
+        return 'session', None
+
+    app.dependency_overrides[require_gis_session] = session_override
+    app.dependency_overrides[get_settings] = lambda: Settings(yandex_maps_api_key='test-key')
+    response = TestClient(app).get('/api/gis/basemap')
+
+    assert response.status_code == 200
+    assert response.headers['cache-control'] == 'no-store'
+    assert response.json() == {'provider': 'yandex', 'scriptUrl': 'https://api-maps.yandex.ru/2.1/?apikey=test-key&lang=ru_RU&csp=true'}
+
+    app.dependency_overrides[get_settings] = lambda: Settings()
+    assert TestClient(app).get('/api/gis/basemap').json() == {'provider': 'yandex', 'scriptUrl': None}

@@ -53,6 +53,8 @@ class Settings(BaseSettings):
     tp_users_cache_ttl_seconds: int = Field(default=300, gt=0)
     gis_base_url: str = ''
     gis_api_token: SecretStr = SecretStr('')
+    yandex_maps_api_key: SecretStr = SecretStr('')
+    gis_map_provider: Literal['yandex'] = 'yandex'
     gis_timeout_seconds: float = Field(default=20.0, gt=0, le=120)
     gis_icon_cache_dir: str = '/app/.cache/gis-icons'
     gis_icon_cache_ttl_seconds: int = Field(default=31_536_000, gt=0)

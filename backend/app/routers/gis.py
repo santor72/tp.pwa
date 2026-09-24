@@ -2,15 +2,24 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 
 from app.dependencies import require_gis_csrf, require_gis_session
+from app.config import Settings, get_settings
 from app.errors import ApiError
 from app.report_photos import MAX_PHOTO_BYTES, validate_report_photo
 from app.schemas import SessionData
 
 router = APIRouter(prefix='/api/gis', tags=['gis'])
 DRAWABLE_GEOMETRIES = {'Point', 'LineString', 'Polygon'}
+
+
+@router.get('/basemap')
+async def basemap(_: tuple[str, SessionData] = Depends(require_gis_session), settings: Settings = Depends(get_settings)):
+    """Return active map-provider configuration only to GIS-enabled sessions."""
+    key = settings.yandex_maps_api_key.get_secret_value().strip()
+    script_url = f'https://api-maps.yandex.ru/2.1/?apikey={key}&lang=ru_RU&csp=true' if key else None
+    return JSONResponse({'provider': settings.gis_map_provider, 'scriptUrl': script_url}, headers={'Cache-Control': 'no-store'})
 
 
 @router.get('/maps')

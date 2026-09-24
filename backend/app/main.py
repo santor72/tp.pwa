@@ -45,6 +45,7 @@ MAX_CONNECTION_COMPLETION_BODY_BYTES = 51 * 1024 * 1024
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    app.state.settings = settings
     session_redis = Redis.from_url(settings.session_redis_url, decode_responses=True)
     cache_redis = Redis.from_url(settings.cache_redis_url, decode_responses=True)
     app.state.session_redis = session_redis

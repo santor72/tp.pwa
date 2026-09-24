@@ -183,6 +183,7 @@ export const api = {
     method: 'DELETE', headers: { 'X-CSRF-Token': csrfToken },
   }),
   gisMaps: () => request<{ rows: GisMap[] }>('/api/gis/maps'),
+  gisBasemap: () => request<{ provider: 'yandex'; scriptUrl: string | null }>('/api/gis/basemap'),
   gisLayers: (mapId: string) => request<{ rows: GisLayer[] }>(`/api/gis/maps/${mapId}/layers`),
   gisBounds: (mapId: string) => request<{ xmin: number; ymin: number; xmax: number; ymax: number }>(`/api/gis/maps/${mapId}/bounds`),
   gisFeatures: (mapId: string, bbox: [number, number, number, number], layers: string[]) => request<GisFeatureCollection>(`/api/gis/maps/${mapId}/features?bbox=${bbox.join(',')}${layers.length ? `&layers=${encodeURIComponent(layers.join(','))}` : ''}`),

@@ -32,6 +32,12 @@ def test_payment_amount_limits_are_decimal() -> None:
         Settings(_env_file=None, bx24_payment_min_amount="500.50", bx24_payment_max_amount="10.25")
 
 
+def test_gis_map_provider_is_explicit_and_limited_to_registered_implementations() -> None:
+    assert Settings(_env_file=None).gis_map_provider == 'yandex'
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, gis_map_provider='2gis')
+
+
 def test_event_runtime_settings_are_complete_and_validate_lease_heartbeat_relation() -> None:
     settings = Settings(_env_file=None)
     assert settings.payment_processing_mode == 'legacy'

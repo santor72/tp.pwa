@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import App from '../src/App'
 
@@ -57,6 +57,30 @@ afterEach(() => {
   sessionStorage.clear()
   vi.useRealTimers()
   vi.unstubAllGlobals()
+})
+
+beforeEach(() => {
+  let container: HTMLElement | null = null
+  const object = () => {
+    const handlers: Record<string, () => void> = {}
+    return { events: { add: (name: string, handler: () => void) => { handlers[name] = handler } }, _handlers: handlers }
+  }
+  class Collection {
+    items: ReturnType<typeof object>[] = []
+    add(item: ReturnType<typeof object>) { this.items.push(item); const marker = document.createElement('button'); marker.className = 'ymaps-feature'; marker.onclick = () => item._handlers.click?.(); container?.append(marker); return this }
+    removeAll() { this.items = []; container?.querySelectorAll('.ymaps-feature').forEach(node => node.remove()) }
+  }
+  class Map {
+    geoObjects = { add: () => undefined }
+    constructor(element: HTMLElement) { container = element }
+    getCenter() { return [55.1, 37.2] }
+    getBounds() { return [[55, 37.1], [55.2, 37.3]] }
+    getZoom() { return 14 }
+    setCenter() {} setZoom() {} setType() {} destroy() {} container = { fitToViewport() {} }
+    events = { add() {} }
+  }
+  function GeoObject() { return object() }
+  vi.stubGlobal('ymaps', { ready: (callback: () => void) => callback(), Map, GeoObjectCollection: Collection, Circle: GeoObject, Placemark: GeoObject, Polygon: GeoObject, Polyline: GeoObject })
 })
 
 describe('Платёжный терминал', () => {
@@ -322,6 +346,7 @@ describe('Карта сети', () => {
       const path = String(input)
       if (path === '/api/auth/session') return json(session)
       if (path === '/api/tickets/today') return json([])
+      if (path === '/api/gis/basemap') return json({ provider: 'yandex', scriptUrl: 'https://api-maps.yandex.ru/2.1/?apikey=test&lang=ru_RU&csp=true' })
       if (path === '/api/gis/maps') return json({ rows: [{ id: mapId, name: 'Чехов', created_at: '2026-09-16T09:00:00Z', report: { total: 1 } }] })
       if (path === `/api/gis/maps/${mapId}/layers`) return json({ rows: [{ id: layerId, name: 'Муфты', position: 1, count: 1, version: 1 }] })
       if (path === `/api/gis/maps/${mapId}/bounds`) return json({ xmin: 37.1, ymin: 55, xmax: 37.3, ymax: 55.2 })
@@ -339,9 +364,11 @@ describe('Карта сети', () => {
     expect(screen.getByRole('button', { name: 'Уменьшить масштаб' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Показать загруженные объекты' })).toBeTruthy()
     expect(screen.getByRole('combobox', { name: 'Подложка карты' })).toBeTruthy()
+    fireEvent.change(screen.getByRole('combobox', { name: 'Подложка карты' }), { target: { value: 'hybrid' } })
+    expect(localStorage.getItem('tp-pwa.gis.basemap')).toBe('hybrid')
     const map = screen.getByRole('application', { name: 'Карта сети' })
-    await waitFor(() => expect(map.querySelector('.leaflet-interactive')).not.toBeNull())
-    fireEvent.click(map.querySelector('.leaflet-interactive')!)
+    await waitFor(() => expect(map.querySelector('.ymaps-feature')).not.toBeNull())
+    fireEvent.click(map.querySelector('.ymaps-feature')!)
     expect(await screen.findByText('Муфта 1')).toBeTruthy()
     expect(await screen.findByRole('dialog', { name: 'Карточка объекта' })).toBeTruthy()
     expect(await screen.findByText(/Адрес: Чехов/)).toBeTruthy()
@@ -358,6 +385,7 @@ describe('Карта сети', () => {
       const path = String(input)
       if (path === '/api/auth/session') return json(session)
       if (path === '/api/tickets/today') return json([])
+      if (path === '/api/gis/basemap') return json({ provider: 'yandex', scriptUrl: 'https://api-maps.yandex.ru/2.1/?apikey=test&lang=ru_RU&csp=true' })
       if (path === '/api/gis/maps') return json({ rows: [{ id: mapId, name: 'Чехов', created_at: '2026-09-16T09:00:00Z', report: { total: 1 } }] })
       if (path === `/api/gis/maps/${mapId}/layers`) return json({ rows: [{ id: layerId, name: 'Муфты', position: 1, count: 1, version: 1 }] })
       if (path === `/api/gis/maps/${mapId}/bounds`) return json({ xmin: 37.1, ymin: 55, xmax: 37.3, ymax: 55.2 })
@@ -370,8 +398,8 @@ describe('Карта сети', () => {
     await screen.findByRole('heading', { name: 'Заявки сегодня' })
     fireEvent.click(screen.getByRole('button', { name: 'Карта' }))
     const map = await screen.findByRole('application', { name: 'Карта сети' })
-    await waitFor(() => expect(map.querySelector('.leaflet-interactive')).not.toBeNull())
-    fireEvent.click(map.querySelector('.leaflet-interactive')!)
+    await waitFor(() => expect(map.querySelector('.ymaps-feature')).not.toBeNull())
+    fireEvent.click(map.querySelector('.ymaps-feature')!)
     const text = await screen.findByLabelText('Описание работ')
     fireEvent.change(text, { target: { value: 'Заменили муфту' } })
     fireEvent.click(screen.getByRole('button', { name: 'Отправить отчёт' }))
@@ -692,6 +720,7 @@ describe('Заявки', () => {
       const path = String(input)
       if (path === '/api/auth/session') return json(session)
       if (path === '/api/tickets/today') return json([ticket])
+      if (path === '/api/gis/basemap') return json({ provider: 'yandex', scriptUrl: 'https://api-maps.yandex.ru/2.1/?apikey=test&lang=ru_RU&csp=true' })
       if (path === '/api/gis/maps') return json({ rows: [{ id: mapId, name: 'Чехов', created_at: '2026-09-16T09:00:00Z', report: { total: 1 } }] })
       if (path === `/api/gis/maps/${mapId}/layers`) return json({ rows: [{ id: layerId, name: 'Муфты', position: 1, count: 1, version: 1 }] })
       if (path === `/api/gis/maps/${mapId}/bounds`) return json({ xmin: 37.1, ymin: 55, xmax: 37.3, ymax: 55.2 })
@@ -704,8 +733,8 @@ describe('Заявки', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Выбрать объект на карте' }))
     const map = await screen.findByRole('application', { name: 'Карта сети' })
     expect(screen.queryByText(/^Слои/)).toBeNull()
-    await waitFor(() => expect(map.querySelector('.leaflet-interactive')).not.toBeNull())
-    fireEvent.click(map.querySelector('.leaflet-interactive')!)
+    await waitFor(() => expect(map.querySelector('.ymaps-feature')).not.toBeNull())
+    fireEvent.click(map.querySelector('.ymaps-feature')!)
     expect(await screen.findByRole('button', { name: 'Выбрать этот объект' })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Выбрать этот объект' }))
     expect(await screen.findByLabelText('Отчёт для GIS')).toBeTruthy()

@@ -8,9 +8,9 @@ import {
   useRef,
   useState,
 } from 'react'
-import { CircleMarker, MapContainer, Marker, Polygon, Polyline, TileLayer, useMap, useMapEvents } from 'react-leaflet'
-import { divIcon } from 'leaflet'
 import { paymentCommands } from './paymentCommands'
+import { YandexMapCanvas } from './YandexMapCanvas'
+import type { GisMapCanvasProps, GisMapView, GisPosition } from './GisMapCanvas'
 
 import {
   api,
@@ -642,7 +642,7 @@ function GisFeaturePicker({ value, onChange }: { value: string; onChange: (value
   const [mapView, setMapView] = useState<GisMapView | null>(null)
   const [fallbackBounds, setFallbackBounds] = useState<[number, number, number, number] | null>(null)
   const [viewportBounds, setViewportBounds] = useState<[number, number, number, number] | null>(null)
-  const [position, setPosition] = useState<Position | null>(null)
+  const [position, setPosition] = useState<GisPosition | null>(null)
   const [locating, setLocating] = useState(false)
   const [locationNotice, setLocationNotice] = useState('')
   const [loading, setLoading] = useState(false)
@@ -1114,24 +1114,13 @@ function Tickets({ day, session }: { day: TicketDay; session: Session }) {
   )
 }
 
-type Position = { longitude: number; latitude: number; accuracy: number }
-
 function coordinatePairs(geometry: GisFeature['geometry']): [number, number][] {
   if (geometry.type === 'Point') return [geometry.coordinates as [number, number]]
   if (geometry.type === 'LineString') return geometry.coordinates as [number, number][]
   return (geometry.coordinates as [number, number][][]).flat()
 }
 
-type GisBasemap = 'streets' | 'satellite' | 'none'
-type GisMapView = { longitude: number; latitude: number; zoom: number }
 const GIS_DEFAULT_ZOOM = 14
-const UUID = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i
-const HEX_COLOR = /^#[a-f\d]{6}$/i
-
-function mapColor(value: string | undefined, fallback: string) {
-  return value && HEX_COLOR.test(value) ? value : fallback
-}
-
 function initialMapView(coordinates: [number, number][]): GisMapView {
   const longitudes = coordinates.map(point => point[0]); const latitudes = coordinates.map(point => point[1])
   const longitude = (Math.min(...longitudes) + Math.max(...longitudes)) / 2
@@ -1140,81 +1129,8 @@ function initialMapView(coordinates: [number, number][]): GisMapView {
   return { longitude, latitude, zoom: Math.max(8, Math.min(18, Math.floor(Math.log2(300 / span)))) }
 }
 
-function basemapTileUrl(basemap: GisBasemap): string | null {
-  if (basemap === 'none') return null
-  if (basemap === 'satellite') return 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
-  return 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
-}
-
-function MapEvents({ view, onViewChange, onBoundsChange }: { view: GisMapView; onViewChange: (view: GisMapView) => void; onBoundsChange: (bounds: [number, number, number, number]) => void }) {
-  const map = useMap()
-  const reportView = useCallback(() => {
-    const center = map.getCenter()
-    const bounds = map.getBounds()
-    onViewChange({ longitude: center.lng, latitude: center.lat, zoom: map.getZoom() })
-    onBoundsChange([bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()])
-  }, [map, onBoundsChange, onViewChange])
-  useEffect(() => {
-    const center = map.getCenter()
-    if (Math.abs(center.lng - view.longitude) > 0.000001 || Math.abs(center.lat - view.latitude) > 0.000001 || map.getZoom() !== view.zoom) {
-      map.setView([view.latitude, view.longitude], view.zoom, { animate: false })
-    }
-  }, [map, view.latitude, view.longitude, view.zoom])
-  useEffect(() => { reportView() }, [reportView])
-  useMapEvents({ moveend: reportView })
-  return null
-}
-
-function MapCanvas({ data, position, view, onViewChange, onBoundsChange, onSelect, onLocate, locating }: { data: GisFeatureCollection | null; position: Position | null; view: GisMapView; onViewChange: (view: GisMapView) => void; onBoundsChange: (bounds: [number, number, number, number]) => void; onSelect: (feature: GisFeature) => void; onLocate: () => void; locating: boolean }) {
-  const features = data?.features ?? []
-  const coordinates = features.flatMap(feature => coordinatePairs(feature.geometry))
-  const [basemap, setBasemap] = useState<GisBasemap>('streets')
-  const [fullscreen, setFullscreen] = useState(false)
-  const canvasRef = useRef<HTMLDivElement>(null)
-  const setZoom = (delta: number) => onViewChange({ ...view, zoom: Math.max(3, Math.min(19, Math.round(view.zoom) + delta)) })
-  const tileUrl = basemapTileUrl(basemap)
-  useEffect(() => {
-    const updateFullscreen = () => setFullscreen(document.fullscreenElement === canvasRef.current)
-    document.addEventListener('fullscreenchange', updateFullscreen)
-    return () => document.removeEventListener('fullscreenchange', updateFullscreen)
-  }, [])
-  const toggleFullscreen = async () => {
-    if (document.fullscreenElement) await document.exitFullscreen()
-    else await canvasRef.current?.requestFullscreen()
-  }
-  return <div ref={canvasRef} className="gis-map-canvas" role="application" aria-label="Карта сети">
-    <MapContainer center={[view.latitude, view.longitude]} zoom={view.zoom} zoomControl={false} scrollWheelZoom className="gis-leaflet-map">
-      <MapEvents view={view} onViewChange={onViewChange} onBoundsChange={onBoundsChange} />
-      {tileUrl && <TileLayer url={tileUrl} attribution={basemap === 'streets' ? '&copy; OpenStreetMap' : 'Tiles &copy; Esri'} />}
-      {features.filter(feature => feature.geometry.type === 'Polygon').map(feature => <Polygon key={feature.id} positions={(feature.geometry.coordinates as [number, number][][]).map(ring => ring.map(([longitude, latitude]) => [latitude, longitude] as [number, number]))} pathOptions={{ color: mapColor(feature.properties.lineColor, mapColor(feature.properties.fillColor, '#ab47bc')), weight: feature.properties.lineWidth || 3, opacity: feature.properties.lineOpacity ?? 1, fillColor: mapColor(feature.properties.fillColor, '#ab47bc'), fillOpacity: feature.properties.fillOpacity ?? .2 }} eventHandlers={{ click: () => onSelect(feature) }} />)}
-      {features.filter(feature => feature.geometry.type === 'LineString').map(feature => <Polyline key={feature.id} positions={coordinatePairs(feature.geometry).map(([longitude, latitude]) => [latitude, longitude] as [number, number])} pathOptions={{ color: feature.properties.lineColor || '#2563eb', weight: feature.properties.lineWidth || 5, opacity: feature.properties.lineOpacity ?? 1, lineCap: 'round', lineJoin: 'round' }} eventHandlers={{ click: () => onSelect(feature) }} />)}
-      {features.filter(feature => feature.geometry.type === 'Point').map(feature => {
-        const [longitude, latitude] = feature.geometry.coordinates as [number, number]
-        const scale = feature.properties.iconScale || 1
-        const color = mapColor(feature.properties.iconColor, '#0288d1')
-        const assetId = feature.properties.iconId
-        if (assetId && UUID.test(assetId)) {
-          const size = Math.round(32 * scale)
-          const recolor = feature.properties.recolorIcon ? `?color=${color.slice(1)}` : ''
-          return <><CircleMarker key={`${feature.id}-fallback`} center={[latitude, longitude]} radius={11 * scale} pathOptions={{ color: 'white', weight: 3, fillColor: color, fillOpacity: 1 }} eventHandlers={{ click: () => onSelect(feature) }} /><Marker key={feature.id} position={[latitude, longitude]} icon={divIcon({ className: 'gis-point-icon', html: `<img src="/api/gis/assets/${assetId}${recolor}" width="${size}" height="${size}" alt="">`, iconSize: [size, size], iconAnchor: [size / 2, size / 2] })} eventHandlers={{ click: () => onSelect(feature) }} /></>
-        }
-        if (feature.properties.markerShape === 'pin') {
-          const size = Math.round(28 * scale)
-          return <Marker key={feature.id} position={[latitude, longitude]} icon={divIcon({ className: 'gis-point-pin', html: `<span style="--gis-point-color:${color};width:${size}px;height:${size}px"></span>`, iconSize: [size, size], iconAnchor: [size / 2, size] })} eventHandlers={{ click: () => onSelect(feature) }} />
-        }
-        return <CircleMarker key={feature.id} center={[latitude, longitude]} radius={11 * scale} pathOptions={{ color: 'white', weight: 3, fillColor: color, fillOpacity: 1 }} eventHandlers={{ click: () => onSelect(feature) }} />
-      })}
-      {position && <CircleMarker center={[position.latitude, position.longitude]} radius={9} pathOptions={{ color: 'white', weight: 3, fillColor: '#2563eb', fillOpacity: 1 }} />}
-    </MapContainer>
-    <div className="gis-map-controls" onPointerDown={event => event.stopPropagation()}>
-      <button type="button" onClick={() => setZoom(1)} aria-label="Увеличить масштаб">+</button>
-      <button type="button" onClick={() => setZoom(-1)} aria-label="Уменьшить масштаб">−</button>
-      <button type="button" onClick={onLocate} disabled={locating} aria-label="Показать моё местоположение" title="Показать моё местоположение">⌖</button>
-      <button type="button" onClick={() => coordinates.length && onViewChange(initialMapView(coordinates))} disabled={!coordinates.length} aria-label="Показать загруженные объекты">⌂</button>
-      <button type="button" onClick={() => void toggleFullscreen()} aria-label={fullscreen ? 'Свернуть карту' : 'Открыть карту на весь экран'} title={fullscreen ? 'Свернуть карту' : 'На весь экран'}>{fullscreen ? '⊡' : '⛶'}</button>
-    </div>
-    <label className="gis-basemap-picker" onPointerDown={event => event.stopPropagation()}><span>Подложка</span><select value={basemap} onChange={event => setBasemap(event.target.value as GisBasemap)} aria-label="Подложка карты"><option value="streets">Схема</option><option value="satellite">Спутник</option><option value="none">Без подложки</option></select></label>
-  </div>
+function MapCanvas(props: Omit<GisMapCanvasProps, 'initialMapView'>) {
+  return <YandexMapCanvas {...props} initialMapView={initialMapView} />
 }
 
 function objectGeometryLabel(feature: GisFeatureDetails): string {
@@ -1324,7 +1240,7 @@ function MapScreen({ session }: { session: Session }) {
   const [selectedDetails, setSelectedDetails] = useState<GisFeatureDetails | null>(null)
   const [detailsLoading, setDetailsLoading] = useState(false)
   const [detailsError, setDetailsError] = useState('')
-  const [position, setPosition] = useState<Position | null>(null)
+  const [position, setPosition] = useState<GisPosition | null>(null)
   const [fallbackBounds, setFallbackBounds] = useState<[number, number, number, number] | null>(null)
   const [mapView, setMapView] = useState<GisMapView | null>(null)
   const [viewportBounds, setViewportBounds] = useState<[number, number, number, number] | null>(null)
@@ -1379,10 +1295,13 @@ function MapScreen({ session }: { session: Session }) {
     else setMapView({ longitude: (fallbackBounds[0] + fallbackBounds[2]) / 2, latitude: (fallbackBounds[1] + fallbackBounds[3]) / 2, zoom: 13 })
   }, [current?.id, fallbackBounds?.join(','), mapView, position?.latitude, position?.longitude])
   const handleViewChange = useCallback((nextView: GisMapView) => {
-    setMapView(nextView)
-    if (current) {
-      try { window.sessionStorage.setItem(`${GIS_MAP_VIEW_KEY}:${current.id}`, JSON.stringify(nextView)) } catch { /* storage may be unavailable */ }
-    }
+    setMapView(previous => {
+      if (previous && Math.abs(previous.longitude - nextView.longitude) < .000001 && Math.abs(previous.latitude - nextView.latitude) < .000001 && previous.zoom === nextView.zoom) return previous
+      if (current) {
+        try { window.sessionStorage.setItem(`${GIS_MAP_VIEW_KEY}:${current.id}`, JSON.stringify(nextView)) } catch { /* storage may be unavailable */ }
+      }
+      return nextView
+    })
   }, [current?.id])
   const updateViewportBounds = useCallback((bounds: [number, number, number, number]) => {
     setViewportBounds(previous => previous?.every((value, index) => Math.abs(value - bounds[index]) < .000001) ? previous : bounds)
@@ -1432,10 +1351,10 @@ function MapScreen({ session }: { session: Session }) {
     )
   }, [handleViewChange])
   const toggleLayer = (layerId: string) => setSelectedLayers(currentLayers => currentLayers.includes(layerId) ? currentLayers.filter(value => value !== layerId) : [...currentLayers, layerId])
-  const openFeature = (feature: GisFeature) => {
+  const openFeature = useCallback((feature: GisFeature) => {
     setSelected(feature); setSelectedDetails(null); setDetailsError(''); setDetailsLoading(true)
     api.gisFeature(feature.id).then(setSelectedDetails).catch(cause => setDetailsError(errorMessage(cause))).finally(() => setDetailsLoading(false))
-  }
+  }, [])
   const closeFeature = () => { setSelected(null); setSelectedDetails(null); setDetailsError('') }
   return <section className="map-screen">
     <div className="step-heading"><h1>Карта сети</h1><p>{locationNotice || 'Определяем местоположение…'}</p></div>
