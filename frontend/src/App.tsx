@@ -846,7 +846,7 @@ function TicketDetails({
         {editable && isReport && <>
           <Field label={needsComment ? 'Что выполнено' : 'Отчёт для ТехПортала'} required={needsComment || !connectionPhotosAllowed}><textarea aria-label={needsComment ? 'Что выполнено' : 'Отчёт для ТехПортала'} value={techportalText} onChange={event => setTechportalText(event.target.value)} rows={needsComment ? 4 : 3} placeholder={needsComment ? 'Опишите выполненные работы' : 'Комментарий о выполненных работах'} /></Field>
           {gisAllowed && <div className="field"><span>Объект GIS — необязательно</span><GisFeaturePicker value={featureId} onChange={setFeatureId} /></div>}
-          {(connectionPhotosAllowed || (featureId && gisPhotosAllowed)) && <Field label={connectionPhotosAllowed ? 'Фотографии' : 'Фотографии для GIS'}><input aria-label="Фотографии выполнения" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" multiple onChange={event => setPhotos(Array.from(event.target.files ?? []))} /></Field>}
+          {(connectionPhotosAllowed || (featureId && gisPhotosAllowed)) && <Field label={connectionPhotosAllowed ? 'Фотографии' : 'Фотографии для GIS'}><input aria-label="Фотографии выполнения" type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={event => setPhotos(Array.from(event.target.files ?? []))} /></Field>}
           {featureId && <Field label="Отчёт для GIS" required={!gisPhotosAllowed}><textarea aria-label="Отчёт для GIS" value={gisText} onChange={event => setGisText(event.target.value)} rows={3} placeholder="Описание для отчёта GIS" /></Field>}
           {completionError && <ErrorBox text={completionError} />}
         </>}
@@ -1254,7 +1254,7 @@ function GisReportForm({ featureId, csrfToken }: { featureId: string; csrfToken:
   return <form className="gis-report-form" onSubmit={submit}>
     <h3>Новый отчёт</h3>
     <Field label="Описание работ"><textarea value={text} onChange={event => { setText(event.target.value); ids.current = null }} maxLength={10_000} rows={4} placeholder="Что выполнено" /></Field>
-    <Field label="Фотографии"><input aria-label="Фотографии" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" multiple onChange={event => { selectPhotos(Array.from(event.target.files ?? [])); ids.current = null }} /></Field>
+    <Field label="Фотографии"><input aria-label="Фотографии" type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={event => { selectPhotos(Array.from(event.target.files ?? [])); ids.current = null }} /></Field>
     {photos.length > 0 && <p className="gis-report-photos">Выбрано фотографий: {photos.length}</p>}
     {error && <ErrorBox text={error} />}
     <button className="primary-button" disabled={sending}>{sending ? 'Отправляем…' : 'Отправить отчёт'}</button>
