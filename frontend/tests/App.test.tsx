@@ -17,7 +17,7 @@ const session = {
     },
   },
   csrf_token: 'csrf-test',
-  capabilities: { payments: true, gis: true, connection_photos: true, messenger_settings: true, all_tickets: false },
+  capabilities: { payments: true, gis: true, gis_tickets: true, connection_photos: true, messenger_settings: true, all_tickets: false },
 }
 
 const ticket = {
@@ -414,7 +414,7 @@ describe('Карта сети', () => {
 
 describe('Capabilities', () => {
   it('скрывает карту и выбор объекта GIS для роли без GIS capability', async () => {
-    const restrictedSession = { ...session, capabilities: { ...session.capabilities, gis: false } }
+    const restrictedSession = { ...session, capabilities: { ...session.capabilities, gis: false, gis_tickets: false } }
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       if (String(input) === '/api/auth/session') return json(restrictedSession)
       if (String(input) === '/api/tickets/today') return json([ticket])
@@ -429,6 +429,22 @@ describe('Capabilities', () => {
     expect(screen.queryByRole('button', { name: 'Выбрать объект на карте' })).toBeNull()
   })
 
+  it('показывает выбор объекта в заявке без доступа к экрану карты', async () => {
+    const restrictedSession = { ...session, capabilities: { ...session.capabilities, gis: false, gis_tickets: true } }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/api/auth/session') return json(restrictedSession)
+      if (String(input) === '/api/tickets/today') return json([ticket])
+      throw new Error(`Неожиданный запрос: ${input}`)
+    }))
+
+    render(<App />)
+
+    await screen.findByRole('heading', { name: 'Заявки сегодня' })
+    expect(screen.queryByRole('button', { name: 'Карта' })).toBeNull()
+    fireEvent.click(await screen.findByRole('button', { name: /СНТ Волга/ }))
+    expect(screen.getByRole('button', { name: 'Выбрать объект на карте' })).toBeTruthy()
+  })
+
   it('скрывает фотографии подключения без S3 capability', async () => {
     const restrictedSession = { ...session, capabilities: { ...session.capabilities, connection_photos: false } }
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
@@ -441,7 +457,7 @@ describe('Capabilities', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /СНТ Волга/ }))
     expect(screen.queryByLabelText('Фотографии выполнения')).toBeNull()
-    expect(screen.getByText('Отчёт для ТехПортала').parentElement?.textContent).toContain('*')
+    expect(screen.getByText('Отчёт для ТехПортала').parentElement?.textContent).not.toContain('*')
   })
 
   it('оставляет настройки карты, когда messenger_settings отключён', async () => {
@@ -634,7 +650,7 @@ describe('Заявки', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/tickets/tomorrow', expect.any(Object))
   })
 
-  it('долгим нажатием открывает форму обязательного отчёта подключения', async () => {
+  it('долгим нажатием открывает форму отчёта подключения', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input)
       if (path === '/api/auth/session') return json(session)
@@ -655,7 +671,7 @@ describe('Заявки', () => {
     expect(fetchMock.mock.calls.some(([path]) => String(path).endsWith('/completion'))).toBe(false)
   })
 
-  it('отправляет обязательный отчёт подключения защищённым multipart-запросом', async () => {
+  it('отправляет подключение без текста и фото защищённым multipart-запросом', async () => {
     let completionRequest: RequestInit | undefined
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input)
@@ -670,12 +686,11 @@ describe('Заявки', () => {
     vi.stubGlobal('fetch', fetchMock)
     render(<App />)
     fireEvent.click(await screen.findByRole('button', { name: /СНТ Волга/ }))
-    fireEvent.change(screen.getByLabelText('Отчёт для ТехПортала'), { target: { value: 'Комментарий ТП' } })
     fireEvent.click(screen.getByRole('button', { name: 'Отметить выполненной' }))
     expect(await screen.findByText('Заявка отмечена выполненной. Отчёт добавлен в ТехПортал.')).toBeTruthy()
     const form = completionRequest?.body as FormData
     expect(form.get('day')).toBe('today')
-    expect(form.get('techportal_text')).toBe('Комментарий ТП')
+    expect(form.get('techportal_text')).toBe('')
     expect(form.get('gis_text')).toBe('')
     expect(form.get('idempotency_key')).toMatch(/^[0-9a-f-]{36}$/)
     expect(new Headers(completionRequest?.headers).get('X-CSRF-Token')).toBe('csrf-test')

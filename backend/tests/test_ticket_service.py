@@ -235,8 +235,8 @@ async def test_completion_uses_authoritative_full_tags_and_can_remove_marker() -
     client = FakeTechPortal([source])
     ticket_service = service(client)
 
-    with pytest.raises(ApiError, match='заполните отчёт'):
-        await ticket_service.set_completed(87, "today", source.id, True)
+    completed_without_comment = await ticket_service.set_completed(87, "today", source.id, True)
+    assert completed_without_comment.completed is True
     completed = await ticket_service.mark_connection_completed(87, "today", source.id, 'Подключение выполнено')
     assert client.comment_persist_calls[-1] == {
         **source.model_dump(mode="json"),
@@ -258,6 +258,17 @@ async def test_completion_uses_authoritative_full_tags_and_can_remove_marker() -
         {"Новое подключение": {}, "Солнечногорск": {}},
     )
     assert reopened.completed is False
+
+
+@pytest.mark.asyncio
+async def test_connection_can_be_completed_without_comment():
+    source = ticket(tags={"Новое подключение": {}})
+    client = FakeTechPortal([source])
+
+    result = await service(client).mark_connection_completed(87, "today", source.id, '')
+
+    assert result.completed is True
+    assert client.comment_persist_calls[-1]['comments'] == ''
 
 
 @pytest.mark.asyncio

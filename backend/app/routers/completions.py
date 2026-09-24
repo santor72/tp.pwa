@@ -46,8 +46,6 @@ async def complete_connection(
     completion_service = request.app.state.connection_completion_service
     if ticket_kind == 'repair' and not techportal_report_text:
         raise ApiError(422, 'REPAIR_COMMENT_REQUIRED', 'Опишите выполненные работы')
-    if ticket_kind == 'connection' and not techportal_report_text and not (photos and completion_service.photos_available):
-        raise ApiError(422, 'CONNECTION_REPORT_REQUIRED', 'Добавьте текст для ТехПортала или фотографию')
     if feature_id and not gis_report_text and not photos:
         raise ApiError(422, 'GIS_REPORT_REQUIRED', 'Добавьте текст отчёта GIS или фотографию')
     if photos and not completion_service.photos_available and not feature_id:
@@ -61,7 +59,7 @@ async def complete_connection(
         validate_report_photo(content_type, content)
         payload_photos.append({'name': photo.filename or 'photo', 'content_type': content_type, 'content': content})
     _, session = session_pair
-    if feature_id and not gis_visible_for_techportal_role(session.user.status, settings.gis_visible_techportal_roles):
+    if feature_id and not gis_visible_for_techportal_role(session.user.status, settings.gis_tikets_visible_techportal_roles):
         raise ApiError(403, 'GIS_ACCESS_DENIED', 'Нет доступа к карте GIS')
     actor = await actor_from_session(request, session)
     technician_name = (session.user.first_name or session.user.email).strip() or str(session.user.id)

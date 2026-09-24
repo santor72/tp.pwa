@@ -40,6 +40,7 @@ class UserProfile(BaseModel):
 class Capabilities(BaseModel):
     payments: bool = False
     gis: bool = False
+    gis_tickets: bool = False
     connection_photos: bool = False
     gis_photos: bool = False
     messenger_settings: bool = False

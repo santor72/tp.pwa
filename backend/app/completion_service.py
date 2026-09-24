@@ -36,8 +36,6 @@ class ConnectionCompletionService:
         await self._tickets.assert_ticket_assigned(actor.techportal_user_id, day, ticket_id, ticket_kind)
         if ticket_kind == 'repair' and not techportal_text:
             raise ApiError(422, 'REPAIR_COMMENT_REQUIRED', 'Опишите выполненные работы')
-        if ticket_kind == 'connection' and not techportal_text and not (photos and self.photos_available):
-            raise ApiError(422, 'CONNECTION_REPORT_REQUIRED', 'Добавьте текст для ТехПортала или фотографию')
         if feature_id and not gis_text and not photos:
             raise ApiError(422, 'GIS_REPORT_REQUIRED', 'Добавьте текст отчёта GIS или фотографию')
         if feature_id and photos and not self.gis_photos_available:

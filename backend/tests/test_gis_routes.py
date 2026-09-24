@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from app.dependencies import require_gis_csrf, require_gis_session
+from app.dependencies import require_gis_csrf, require_gis_data_session
 from app.config import Settings, get_settings
 from app.routers.gis import router
 from app.schemas import SessionData, UserProfile
@@ -91,7 +91,7 @@ def test_features_keeps_all_supported_geojson_geometries():
     async def session_override():
         return 'session', None
 
-    app.dependency_overrides[require_gis_session] = session_override
+    app.dependency_overrides[require_gis_data_session] = session_override
     map_id = uuid4()
     response = TestClient(app).get(f'/api/gis/maps/{map_id}/features', params={
         'bbox': '37.1,55.0,37.4,55.3', 'layers': 'layer-1',
@@ -109,7 +109,7 @@ def test_basemap_returns_official_sdk_url_only_when_key_is_configured():
     async def session_override():
         return 'session', None
 
-    app.dependency_overrides[require_gis_session] = session_override
+    app.dependency_overrides[require_gis_data_session] = session_override
     app.dependency_overrides[get_settings] = lambda: Settings(yandex_maps_api_key='test-key')
     response = TestClient(app).get('/api/gis/basemap')
 

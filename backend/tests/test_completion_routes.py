@@ -101,7 +101,7 @@ def test_repair_completion_requires_text_and_passes_ticket_kind():
     assert completion.begin_args[1]['techportal_text'] == 'Заменили кабель'
 
 
-def test_connection_completion_rejects_empty_report_before_service():
+def test_connection_completion_accepts_empty_report():
     app = FastAPI()
     completion = FakeCompletionService()
     app.state.connection_completion_service = completion
@@ -120,9 +120,9 @@ def test_connection_completion_rejects_empty_report_before_service():
     response = TestClient(app).post('/api/tickets/32412/connection-completion', data={
         'day': 'today', 'idempotency_key': str(uuid4()), 'techportal_text': ' ',
     })
-    assert response.status_code == 422
-    assert response.json()['detail'] == 'Добавьте текст для ТехПортала или фотографию'
-    assert completion.begin_args is None
+    assert response.status_code == 200
+    assert completion.begin_args[1]['techportal_text'] == ''
+    assert completion.begin_args[1]['photos'] == []
 
 
 def test_connection_completion_rejects_photos_when_no_adapter_is_configured():
@@ -195,7 +195,7 @@ def test_connection_completion_accepts_gis_only_photo_with_techportal_text():
 
     app.dependency_overrides[require_csrf] = csrf_override
     from app.config import Settings, get_settings
-    app.dependency_overrides[get_settings] = lambda: Settings(gis_visible_techportal_roles='active')
+    app.dependency_overrides[get_settings] = lambda: Settings(gis_tikets_visible_techportal_roles='active')
     image = BytesIO()
     Image.new('RGB', (1, 1)).save(image, format='JPEG')
     response = TestClient(app).post('/api/tickets/32412/connection-completion', data={

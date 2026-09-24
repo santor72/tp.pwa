@@ -4,7 +4,7 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
 
-from app.dependencies import require_gis_csrf, require_gis_session
+from app.dependencies import require_gis_csrf, require_gis_data_session
 from app.config import Settings, get_settings
 from app.errors import ApiError
 from app.report_photos import MAX_PHOTO_BYTES, validate_report_photo
@@ -15,7 +15,7 @@ DRAWABLE_GEOMETRIES = {'Point', 'LineString', 'Polygon'}
 
 
 @router.get('/basemap')
-async def basemap(_: tuple[str, SessionData] = Depends(require_gis_session), settings: Settings = Depends(get_settings)):
+async def basemap(_: tuple[str, SessionData] = Depends(require_gis_data_session), settings: Settings = Depends(get_settings)):
     """Return active map-provider configuration only to GIS-enabled sessions."""
     key = settings.yandex_maps_api_key.get_secret_value().strip()
     script_url = f'https://api-maps.yandex.ru/2.1/?apikey={key}&lang=ru_RU&csp=true' if key else None
@@ -23,22 +23,22 @@ async def basemap(_: tuple[str, SessionData] = Depends(require_gis_session), set
 
 
 @router.get('/maps')
-async def maps(request: Request, _: tuple[str, SessionData] = Depends(require_gis_session)):
+async def maps(request: Request, _: tuple[str, SessionData] = Depends(require_gis_data_session)):
     return await request.app.state.gis_client.maps()
 
 
 @router.get('/maps/{map_id}/layers')
-async def layers(map_id: UUID, request: Request, _: tuple[str, SessionData] = Depends(require_gis_session)):
+async def layers(map_id: UUID, request: Request, _: tuple[str, SessionData] = Depends(require_gis_data_session)):
     return await request.app.state.gis_client.layers(str(map_id))
 
 
 @router.get('/maps/{map_id}/bounds')
-async def bounds(map_id: UUID, request: Request, _: tuple[str, SessionData] = Depends(require_gis_session)):
+async def bounds(map_id: UUID, request: Request, _: tuple[str, SessionData] = Depends(require_gis_data_session)):
     return await request.app.state.gis_client.bounds(str(map_id))
 
 
 @router.get('/maps/{map_id}/features')
-async def features(map_id: UUID, request: Request, bbox: str = Query(pattern=r'^-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?$'), layers: str | None = Query(default=None, max_length=2048), _: tuple[str, SessionData] = Depends(require_gis_session)):
+async def features(map_id: UUID, request: Request, bbox: str = Query(pattern=r'^-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?$'), layers: str | None = Query(default=None, max_length=2048), _: tuple[str, SessionData] = Depends(require_gis_data_session)):
     result = await request.app.state.gis_client.features(str(map_id), bbox=bbox, layers=layers)
     features = result.get('features')
     if isinstance(features, list):
@@ -55,16 +55,16 @@ async def features(map_id: UUID, request: Request, bbox: str = Query(pattern=r'^
 
 
 @router.get('/maps/{map_id}/search')
-async def search(map_id: UUID, request: Request, q: str = Query(min_length=1, max_length=200), _: tuple[str, SessionData] = Depends(require_gis_session)):
+async def search(map_id: UUID, request: Request, q: str = Query(min_length=1, max_length=200), _: tuple[str, SessionData] = Depends(require_gis_data_session)):
     return await request.app.state.gis_client.search(str(map_id), q)
 
 
 @router.get('/features/{feature_id}')
-async def feature(feature_id: UUID, request: Request, _: tuple[str, SessionData] = Depends(require_gis_session)):
+async def feature(feature_id: UUID, request: Request, _: tuple[str, SessionData] = Depends(require_gis_data_session)):
     return await request.app.state.gis_client.feature(str(feature_id))
 
 @router.get('/assets/{asset_id}')
-async def asset(asset_id: UUID, request: Request, color: str | None = Query(default=None, pattern=r'^[a-fA-F0-9]{6}$'), _: tuple[str, SessionData] = Depends(require_gis_session)):
+async def asset(asset_id: UUID, request: Request, color: str | None = Query(default=None, pattern=r'^[a-fA-F0-9]{6}$'), _: tuple[str, SessionData] = Depends(require_gis_data_session)):
     return Response(await request.app.state.gis_client.asset(str(asset_id), color), media_type='image/png', headers={'Cache-Control': 'private, max-age=3600'})
 
 

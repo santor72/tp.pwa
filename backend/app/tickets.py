@@ -140,8 +140,6 @@ class TicketService:
         if ticket is None:
             raise TicketNotFoundError()
         is_repair = CONNECTION_TAG not in ticket.tags
-        if completed and not is_repair:
-            raise ApiError(422, 'CONNECTION_REPORT_REQUIRED', 'Для выполнения подключения заполните отчёт')
         if completed and is_repair:
             if not comment:
                 raise RepairCommentRequiredError()
@@ -206,7 +204,6 @@ class TicketService:
         if not comment.strip():
             if ticket_kind == 'repair':
                 raise RepairCommentRequiredError()
-            raise ApiError(422, 'CONNECTION_REPORT_REQUIRED', 'Добавьте текст отчёта или фотографию')
         await self.assert_ticket_assigned(user_id, day, ticket_id, ticket_kind)
         raw_ticket = await self._client.ticket_by_id(ticket_id)
         if raw_ticket is None:

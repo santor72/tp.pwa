@@ -228,6 +228,20 @@ async def test_techportal_photo_alone_can_complete_connection_without_report_tex
     operation = await subject.mark_techportal(operation.id)
 
     assert operation.completion_status == 'completed'
+
+
+@pytest.mark.asyncio
+async def test_connection_can_complete_without_report_text_or_photos():
+    subject = service()
+    actor = Actor(user_id=uuid4(), techportal_user_id='17', channel='pwa')
+
+    operation = await subject.begin(actor, ticket_id=12, day='today', idempotency_key=uuid4(),
+                                    techportal_text='', gis_text='', feature_id=None,
+                                    technician_name='Иван', photos=[])
+    operation = await subject.mark_techportal(operation.id)
+
+    assert operation.completion_status == 'completed'
+    assert subject._tickets.marked[0][3] == 'Иван'
     assert subject._tickets.marked[0][3] == 'Иван'
 
 
@@ -324,17 +338,16 @@ async def test_gis_only_s3_stages_photo_after_other_techportal_adapter():
 
 
 @pytest.mark.asyncio
-async def test_gis_only_s3_does_not_make_photos_a_techportal_report():
+async def test_gis_only_s3_can_complete_connection_without_techportal_report():
     subject = service()
     subject._storage.techportal_enabled = False
     actor = Actor(user_id=uuid4(), techportal_user_id='17', channel='pwa')
 
-    with pytest.raises(ApiError) as error:
-        await subject.begin(actor, ticket_id=12, day='today', idempotency_key=uuid4(),
-                            techportal_text='', gis_text='GIS', feature_id=uuid4(), technician_name='Иван',
-                            photos=[{'name': 'work.jpg', 'content_type': 'image/jpeg', 'content': b'photo'}])
+    operation = await subject.begin(actor, ticket_id=12, day='today', idempotency_key=uuid4(),
+                                    techportal_text='', gis_text='GIS', feature_id=uuid4(), technician_name='Иван',
+                                    photos=[{'name': 'work.jpg', 'content_type': 'image/jpeg', 'content': b'photo'}])
 
-    assert error.value.code == 'CONNECTION_REPORT_REQUIRED'
+    assert operation.completion_status == 'marking'
 
 
 @pytest.mark.asyncio

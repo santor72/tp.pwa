@@ -57,11 +57,27 @@ def require_gis_access(session: SessionData, settings: Settings) -> None:
         raise PermissionDeniedError()
 
 
+def require_gis_data_access(session: SessionData, settings: Settings) -> None:
+    if not (
+        gis_visible_for_techportal_role(session.user.status, settings.gis_visible_techportal_roles)
+        or gis_visible_for_techportal_role(session.user.status, settings.gis_tikets_visible_techportal_roles)
+    ):
+        raise PermissionDeniedError()
+
+
 async def require_gis_session(
     session_pair: tuple[str, SessionData] = Depends(require_session),
     settings: Settings = Depends(get_settings),
 ) -> tuple[str, SessionData]:
     require_gis_access(session_pair[1], settings)
+    return session_pair
+
+
+async def require_gis_data_session(
+    session_pair: tuple[str, SessionData] = Depends(require_session),
+    settings: Settings = Depends(get_settings),
+) -> tuple[str, SessionData]:
+    require_gis_data_access(session_pair[1], settings)
     return session_pair
 
 

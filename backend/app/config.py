@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     gis_icon_cache_dir: str = '/app/.cache/gis-icons'
     gis_icon_cache_ttl_seconds: int = Field(default=31_536_000, gt=0)
     gis_visible_techportal_roles: str = ''
+    gis_tikets_visible_techportal_roles: str = ''
     gis_completion_worker_poll_seconds: float = Field(default=5.0, gt=0, le=300)
     gis_completion_worker_batch_size: int = Field(default=10, ge=1, le=100)
 

@@ -806,7 +806,6 @@ function TicketDetails({
   const [completionError, setCompletionError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const completionIdempotencyKey = useRef(createUuid())
-  const photosForTechPortal = connectionPhotosAllowed && photos.length > 0
   const needsComment = ticket.kind === 'repair' && !ticket.completed
   const isReport = !ticket.completed
   useEffect(() => {
@@ -833,7 +832,6 @@ function TicketDetails({
     const portalText = techportalText.trim()
     const mapText = gisText.trim()
     if (needsComment && !portalText) { setCompletionError('Опишите выполненные работы'); return }
-    if (!needsComment && !portalText && !photosForTechPortal) { setCompletionError('Добавьте текст для ТехПортала или фотографию'); return }
     if (featureId.trim() && !mapText && !photos.length) { setCompletionError('Добавьте текст отчёта GIS или фотографию'); return }
     if (featureId.trim() && photos.length && !gisPhotosAllowed) { setCompletionError('Для отправки фотографий в GIS требуется настроенное S3-хранилище'); return }
     setSubmitting(true); setCompletionError('')
@@ -872,7 +870,7 @@ function TicketDetails({
           <p>{ticket.description || 'Описание отсутствует'}</p>
         </div>
         {editable && isReport && <>
-          <Field label={needsComment ? 'Что выполнено' : 'Отчёт для ТехПортала'} required={needsComment || !connectionPhotosAllowed}><textarea aria-label={needsComment ? 'Что выполнено' : 'Отчёт для ТехПортала'} value={techportalText} onChange={event => setTechportalText(event.target.value)} rows={needsComment ? 4 : 3} placeholder={needsComment ? 'Опишите выполненные работы' : 'Комментарий о выполненных работах'} /></Field>
+          <Field label={needsComment ? 'Что выполнено' : 'Отчёт для ТехПортала'} required={needsComment}><textarea aria-label={needsComment ? 'Что выполнено' : 'Отчёт для ТехПортала'} value={techportalText} onChange={event => setTechportalText(event.target.value)} rows={needsComment ? 4 : 3} placeholder={needsComment ? 'Опишите выполненные работы' : 'Комментарий о выполненных работах'} /></Field>
           {gisAllowed && <div className="field"><span>Объект GIS — необязательно</span><GisFeaturePicker value={featureId} onChange={setFeatureId} /></div>}
           {(connectionPhotosAllowed || (featureId && gisPhotosAllowed)) && <Field label={connectionPhotosAllowed ? 'Фотографии' : 'Фотографии для GIS'}><input aria-label="Фотографии выполнения" type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={event => setPhotos(Array.from(event.target.files ?? []))} /></Field>}
           {featureId && <Field label="Отчёт для GIS" required={!gisPhotosAllowed}><textarea aria-label="Отчёт для GIS" value={gisText} onChange={event => setGisText(event.target.value)} rows={3} placeholder="Описание для отчёта GIS" /></Field>}
@@ -1026,7 +1024,7 @@ function Tickets({ day, session }: { day: TicketDay; session: Session }) {
             }
             return completion
           }}
-          gisAllowed={session.capabilities.gis}
+          gisAllowed={session.capabilities.gis_tickets}
           connectionPhotosAllowed={session.capabilities.connection_photos}
           gisPhotosAllowed={session.capabilities.gis_photos}
         />
