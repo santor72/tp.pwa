@@ -110,6 +110,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     window.dispatchEvent(new Event('auth-expired'))
   }
   if (!response.ok) {
+    if (response.status === 413) {
+      throw new ApiError(413, data.code ?? 'REQUEST_TOO_LARGE', data.message ?? 'Размер вложений превышает допустимый для отправки. Уменьшите размер или количество фотографий.')
+    }
     throw new ApiError(response.status, data.code ?? 'REQUEST_FAILED', data.message ?? 'Ошибка запроса')
   }
   return data as T
