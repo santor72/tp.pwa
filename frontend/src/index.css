@@ -183,13 +183,14 @@ input:focus, textarea:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px #dbea
 .bottom-nav {
   position: fixed;
   z-index: 20;
-  left: 50%;
+  left: 0;
+  right: 0;
   bottom: 0;
   width: min(100%, 44rem);
+  margin: 0 auto;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(3.25rem, 1fr));
   padding: .45rem max(.55rem, env(safe-area-inset-left)) calc(.45rem + env(safe-area-inset-bottom));
-  transform: translateX(-50%);
   background: #ffffffee;
   border-top: 1px solid #dbe2ea;
   box-shadow: 0 -8px 24px #0f172a10;
