@@ -1231,6 +1231,9 @@ function GisFeatureCard({ feature, details, loading, error, csrfToken, onClose }
 }
 
 function MapScreen({ session }: { session: Session }) {
+  // The layer picker is retained for a possible future return, but the map now
+  // always loads every available layer.
+  const showLayerSelector = false
   const [maps, setMaps] = useState<GisMap[]>([])
   const [current, setCurrent] = useState<GisMap | null>(null)
   const [layers, setLayers] = useState<GisLayer[]>([])
@@ -1307,11 +1310,12 @@ function MapScreen({ session }: { session: Session }) {
     setViewportBounds(previous => previous?.every((value, index) => Math.abs(value - bounds[index]) < .000001) ? previous : bounds)
   }, [])
   useEffect(() => {
-    if (!current || !selectedLayers.length || !viewportBounds) return
+    if (!current || !layers.length || !viewportBounds) return
     let active = true
-    const timer = window.setTimeout(() => api.gisFeatures(current.id, viewportBounds, selectedLayers).then(result => active && setData(result)).catch(cause => active && setError(errorMessage(cause))), 250)
+    const layerIds = layers.map(layer => layer.id)
+    const timer = window.setTimeout(() => api.gisFeatures(current.id, viewportBounds, layerIds).then(result => active && setData(result)).catch(cause => active && setError(errorMessage(cause))), 250)
     return () => { active = false; window.clearTimeout(timer) }
-  }, [current?.id, selectedLayers.join(','), viewportBounds?.join(',')])
+  }, [current?.id, layers.map(layer => layer.id).join(','), viewportBounds?.join(',')])
   useEffect(() => {
     if (!navigator.geolocation) { setLocationNotice('Геолокация не поддерживается устройством'); return }
     const watch = navigator.geolocation.watchPosition(
@@ -1362,7 +1366,7 @@ function MapScreen({ session }: { session: Session }) {
     {loading && <div className="panel empty-state">Загрузка карты…</div>}
     {!loading && maps.length === 0 && <div className="panel empty-state">Нет доступных карт</div>}
     {maps.length > 1 && <label className="field"><span>Карта</span><select value={current?.id ?? ''} onChange={event => setCurrent(maps.find(map => map.id === event.target.value) ?? null)}>{maps.map(map => <option key={map.id} value={map.id}>{map.name}</option>)}</select></label>}
-    {layers.length > 0 && <details className="gis-layers-panel"><summary>Слои <span>{selectedLayers.length} из {layers.length}</span></summary><div className="gis-layers">{layers.map(layer => <label key={layer.id}><input type="checkbox" checked={selectedLayers.includes(layer.id)} onChange={() => toggleLayer(layer.id)} />{layer.name}</label>)}</div></details>}
+    {showLayerSelector && layers.length > 0 && <details className="gis-layers-panel"><summary>Слои <span>{selectedLayers.length} из {layers.length}</span></summary><div className="gis-layers">{layers.map(layer => <label key={layer.id}><input type="checkbox" checked={selectedLayers.includes(layer.id)} onChange={() => toggleLayer(layer.id)} />{layer.name}</label>)}</div></details>}
     {mapView && <MapCanvas data={data} position={position} view={mapView} onViewChange={handleViewChange} onBoundsChange={updateViewportBounds} onSelect={openFeature} onLocate={locate} locating={locating} />}
     {data?.truncated && <div className="error-box">Показана не вся сеть. Уточните область на карте.</div>}
     <GisFeatureCard key={selected?.id} feature={selected} details={selectedDetails} loading={detailsLoading} error={detailsError} csrfToken={session.csrf_token} onClose={closeFeature} />

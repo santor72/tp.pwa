@@ -254,8 +254,10 @@ input:focus, textarea:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px #dbea
 .gis-report-form .primary-button { margin-top: .1rem; }
 .gis-report-photos { color: #64748b !important; }
 .gis-picker { display: grid; gap: .8rem; }
-.gis-picker .gis-map-canvas { min-height: var(--gis-picker-map-height); }
-.gis-picker .gis-yandex-map { height: var(--gis-picker-map-height); min-height: var(--gis-picker-map-height); }
+/* The picker is a bottom sheet, so its map must fit the remaining sheet space
+   rather than calculate its size from the full viewport. */
+.gis-picker .gis-map-canvas { height: min(var(--gis-picker-map-height), max(12rem, calc(92dvh - 15rem - env(safe-area-inset-bottom)))); min-height: 0; }
+.gis-picker .gis-yandex-map { height: min(var(--gis-picker-map-height), max(12rem, calc(92dvh - 15rem - env(safe-area-inset-bottom)))); min-height: 0; }
 .gis-map-notice { margin: 0; color: #64748b; font-size: .8rem; }
 .gis-point-icon, .gis-point-pin { border: 0; background: transparent; }
 .gis-point-icon img { display: block; object-fit: contain; }
