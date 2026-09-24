@@ -84,7 +84,12 @@ export type MessengerLinkCreate = {
 }
 export type GisMap = { id: string; name: string; created_at: string; report: { total: number } }
 export type GisLayer = { id: string; name: string; position: number; count: number; version: number }
-export type GisFeature = { type: 'Feature'; id: string; geometry: { type: 'Point' | 'LineString' | 'Polygon'; coordinates: unknown }; properties: { id: string; layer_id: string; title?: string; number?: number; kind: string; iconColor?: string; lineColor?: string; fillColor?: string } }
+export type GisFeatureStyle = {
+  iconColor?: string; iconId?: string | null; iconScale?: number; markerShape?: 'pin' | 'circle'; recolorIcon?: boolean
+  lineColor?: string; lineWidth?: number; lineOpacity?: number
+  fillColor?: string; fillOpacity?: number
+}
+export type GisFeature = { type: 'Feature'; id: string; geometry: { type: 'Point' | 'LineString' | 'Polygon'; coordinates: unknown }; properties: { id: string; layer_id: string; title?: string; number?: number; kind: string } & GisFeatureStyle }
 export type GisFeatureCollection = { type: 'FeatureCollection'; truncated: boolean; limit: number; features: GisFeature[] }
 export type GisFeatureDetails = { id: string; layer_id: string; map_id: string; layer_name: string; title: string; number: number; kind: string; description: string; geometry: GisFeature['geometry']; style: Record<string, unknown>; version: number }
 export type GisReportReceipt = { id: string; external_report_id: string; repeated: boolean; retention_until: string | null }

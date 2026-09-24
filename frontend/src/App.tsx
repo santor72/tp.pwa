@@ -8,7 +8,8 @@ import {
   useRef,
   useState,
 } from 'react'
-import { CircleMarker, MapContainer, Polyline, TileLayer, useMap, useMapEvents } from 'react-leaflet'
+import { CircleMarker, MapContainer, Marker, Polygon, Polyline, TileLayer, useMap, useMapEvents } from 'react-leaflet'
+import { divIcon } from 'leaflet'
 import { paymentCommands } from './paymentCommands'
 
 import {
@@ -1124,6 +1125,12 @@ function coordinatePairs(geometry: GisFeature['geometry']): [number, number][] {
 type GisBasemap = 'streets' | 'satellite' | 'none'
 type GisMapView = { longitude: number; latitude: number; zoom: number }
 const GIS_DEFAULT_ZOOM = 14
+const UUID = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i
+const HEX_COLOR = /^#[a-f\d]{6}$/i
+
+function mapColor(value: string | undefined, fallback: string) {
+  return value && HEX_COLOR.test(value) ? value : fallback
+}
 
 function initialMapView(coordinates: [number, number][]): GisMapView {
   const longitudes = coordinates.map(point => point[0]); const latitudes = coordinates.map(point => point[1])
@@ -1179,8 +1186,24 @@ function MapCanvas({ data, position, view, onViewChange, onBoundsChange, onSelec
     <MapContainer center={[view.latitude, view.longitude]} zoom={view.zoom} zoomControl={false} scrollWheelZoom className="gis-leaflet-map">
       <MapEvents view={view} onViewChange={onViewChange} onBoundsChange={onBoundsChange} />
       {tileUrl && <TileLayer url={tileUrl} attribution={basemap === 'streets' ? '&copy; OpenStreetMap' : 'Tiles &copy; Esri'} />}
-      {features.filter(feature => feature.geometry.type === 'LineString').map(feature => <Polyline key={feature.id} positions={coordinatePairs(feature.geometry).map(([longitude, latitude]) => [latitude, longitude] as [number, number])} pathOptions={{ color: feature.properties.lineColor || '#2563eb', weight: 5, lineCap: 'round', lineJoin: 'round' }} eventHandlers={{ click: () => onSelect(feature) }} />)}
-      {features.filter(feature => feature.geometry.type === 'Point').map(feature => { const [longitude, latitude] = feature.geometry.coordinates as [number, number]; return <CircleMarker key={feature.id} center={[latitude, longitude]} radius={11} pathOptions={{ color: 'white', weight: 3, fillColor: feature.properties.iconColor || '#0288d1', fillOpacity: 1 }} eventHandlers={{ click: () => onSelect(feature) }} /> })}
+      {features.filter(feature => feature.geometry.type === 'Polygon').map(feature => <Polygon key={feature.id} positions={(feature.geometry.coordinates as [number, number][][]).map(ring => ring.map(([longitude, latitude]) => [latitude, longitude] as [number, number]))} pathOptions={{ color: mapColor(feature.properties.lineColor, mapColor(feature.properties.fillColor, '#ab47bc')), weight: feature.properties.lineWidth || 3, opacity: feature.properties.lineOpacity ?? 1, fillColor: mapColor(feature.properties.fillColor, '#ab47bc'), fillOpacity: feature.properties.fillOpacity ?? .2 }} eventHandlers={{ click: () => onSelect(feature) }} />)}
+      {features.filter(feature => feature.geometry.type === 'LineString').map(feature => <Polyline key={feature.id} positions={coordinatePairs(feature.geometry).map(([longitude, latitude]) => [latitude, longitude] as [number, number])} pathOptions={{ color: feature.properties.lineColor || '#2563eb', weight: feature.properties.lineWidth || 5, opacity: feature.properties.lineOpacity ?? 1, lineCap: 'round', lineJoin: 'round' }} eventHandlers={{ click: () => onSelect(feature) }} />)}
+      {features.filter(feature => feature.geometry.type === 'Point').map(feature => {
+        const [longitude, latitude] = feature.geometry.coordinates as [number, number]
+        const scale = feature.properties.iconScale || 1
+        const color = mapColor(feature.properties.iconColor, '#0288d1')
+        const assetId = feature.properties.iconId
+        if (assetId && UUID.test(assetId)) {
+          const size = Math.round(32 * scale)
+          const recolor = feature.properties.recolorIcon ? `?color=${color.slice(1)}` : ''
+          return <><CircleMarker key={`${feature.id}-fallback`} center={[latitude, longitude]} radius={11 * scale} pathOptions={{ color: 'white', weight: 3, fillColor: color, fillOpacity: 1 }} eventHandlers={{ click: () => onSelect(feature) }} /><Marker key={feature.id} position={[latitude, longitude]} icon={divIcon({ className: 'gis-point-icon', html: `<img src="/api/gis/assets/${assetId}${recolor}" width="${size}" height="${size}" alt="">`, iconSize: [size, size], iconAnchor: [size / 2, size / 2] })} eventHandlers={{ click: () => onSelect(feature) }} /></>
+        }
+        if (feature.properties.markerShape === 'pin') {
+          const size = Math.round(28 * scale)
+          return <Marker key={feature.id} position={[latitude, longitude]} icon={divIcon({ className: 'gis-point-pin', html: `<span style="--gis-point-color:${color};width:${size}px;height:${size}px"></span>`, iconSize: [size, size], iconAnchor: [size / 2, size] })} eventHandlers={{ click: () => onSelect(feature) }} />
+        }
+        return <CircleMarker key={feature.id} center={[latitude, longitude]} radius={11 * scale} pathOptions={{ color: 'white', weight: 3, fillColor: color, fillOpacity: 1 }} eventHandlers={{ click: () => onSelect(feature) }} />
+      })}
       {position && <CircleMarker center={[position.latitude, position.longitude]} radius={9} pathOptions={{ color: 'white', weight: 3, fillColor: '#2563eb', fillOpacity: 1 }} />}
     </MapContainer>
     <div className="gis-map-controls" onPointerDown={event => event.stopPropagation()}>

@@ -40,6 +40,7 @@ class CapturingGisClient:
         return {'id': 'report-id', 'external_report_id': metadata['external_report_id'], 'repeated': False, 'retention_until': None}
 
 
+
 def test_map_report_uses_server_author_and_reserved_ticket_id():
     app = FastAPI()
     gis = CapturingGisClient()
@@ -80,7 +81,7 @@ def test_map_report_uses_server_author_and_reserved_ticket_id():
     assert gis.photos[0][1].startswith(b'\xff\xd8\xff')
 
 
-def test_features_excludes_polygons_before_returning_to_browser():
+def test_features_keeps_all_supported_geojson_geometries():
     app = FastAPI()
     gis = CapturingGisClient()
     app.state.gis_client = gis
@@ -96,5 +97,5 @@ def test_features_excludes_polygons_before_returning_to_browser():
     })
 
     assert response.status_code == 200
-    assert [feature['id'] for feature in response.json()['features']] == ['point', 'line']
+    assert [feature['id'] for feature in response.json()['features']] == ['point', 'line', 'polygon']
     assert gis.feature_calls == [(str(map_id), '37.1,55.0,37.4,55.3', 'layer-1')]

@@ -80,6 +80,7 @@ services:
       GIS_BASE_URL: ${GIS_BASE_URL:-}
       GIS_API_TOKEN: ${GIS_API_TOKEN:-}
       GIS_TIMEOUT_SECONDS: ${GIS_TIMEOUT_SECONDS:-20}
+      GIS_ICON_CACHE_TTL_SECONDS: ${GIS_ICON_CACHE_TTL_SECONDS:-31536000}
       GIS_VISIBLE_TECHPORTAL_ROLES: ${GIS_VISIBLE_TECHPORTAL_ROLES:-}
       S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://seaweedfs:8333}
       S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
@@ -129,6 +130,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    volumes:
+      - gis-icon-cache:/app/.cache/gis-icons
 
   seaweedfs-config:
     image: python:3.13-alpine
@@ -380,6 +383,7 @@ services:
       - ./infrastructure/vector/vector.toml:/etc/vector/vector.toml:ro
 
 volumes:
+  gis-icon-cache:
   redis-data:
   postgres-data:
   seaweedfs-data:

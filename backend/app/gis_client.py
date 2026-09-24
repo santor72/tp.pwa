@@ -1,5 +1,9 @@
 import logging
 import json
+import os
+import time
+import zlib
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -30,6 +34,64 @@ class GisClient:
         return await self._request('GET', f'maps/{map_id}/features', params=params)
     async def search(self, map_id: str, query: str) -> dict[str, Any]: return await self._request('GET', f'maps/{map_id}/search', params={'q': query})
     async def feature(self, feature_id: str) -> dict[str, Any]: return await self._request('GET', f'features/{feature_id}')
+
+    async def asset(self, asset_id: str, color: str | None = None) -> bytes:
+        path = Path(self._settings.gis_icon_cache_dir) / f'{asset_id}.png'
+        try:
+            if path.is_file() and time.time() - path.stat().st_mtime < self._settings.gis_icon_cache_ttl_seconds:
+                source = path.read_bytes()
+                return self._recolor_icon(source, color) if color else source
+        except OSError:
+            pass
+        token = self._settings.gis_api_token.get_secret_value()
+        if not self._settings.gis_base_url or not token:
+            raise ApiError(503, 'GIS_NOT_CONFIGURED', 'Интеграция с картой не настроена')
+        try:
+            response = await self._client.get(f'{self._settings.gis_base_url}/integration/v1/assets/{asset_id}', headers={'Authorization': f'Bearer {token}', 'Accept': 'image/png'})
+        except httpx.HTTPError as exc:
+            raise ServiceUnavailableError('Карта временно недоступна') from exc
+        if response.is_error:
+            self._response(response, 'asset')
+        if not response.headers.get('content-type', '').lower().startswith('image/png') or not response.content.startswith(b'\x89PNG\r\n\x1a\n'):
+            raise ApiError(502, 'GIS_RESPONSE_INVALID', 'Карта вернула некорректный значок')
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = path.with_suffix('.tmp')
+            temporary.write_bytes(response.content)
+            os.replace(temporary, path)
+        except OSError as exc:
+            logger.warning('GIS icon cache unavailable', extra={'event': 'gis.icon_cache.unavailable', 'fields': {'error': type(exc).__name__}})
+        return self._recolor_icon(response.content, color) if color else response.content
+
+    @staticmethod
+    def _recolor_icon(source: bytes, color: str) -> bytes:
+        if not color or len(color) != 6 or any(c not in '0123456789abcdefABCDEF' for c in color):
+            raise ApiError(422, 'GIS_ICON_COLOR_INVALID', 'Некорректный цвет значка')
+        if len(source) < 33 or source[:8] != b'\x89PNG\r\n\x1a\n' or source[12:16] != b'IHDR' or source[25] != 3:
+            raise ApiError(422, 'GIS_ICON_RECOLOR_UNSUPPORTED', 'Этот формат значка не поддерживает перекрашивание')
+        offset = 8; palette = None; alpha = b''
+        while offset + 12 <= len(source):
+            size = int.from_bytes(source[offset:offset + 4], 'big'); end = offset + size + 12
+            if end > len(source): break
+            kind = source[offset + 4:offset + 8]
+            if kind == b'PLTE': palette = offset
+            elif kind == b'tRNS': alpha = source[offset + 8:offset + 8 + size]
+            elif kind == b'IEND': break
+            offset = end
+        if palette is None:
+            raise ApiError(422, 'GIS_ICON_RECOLOR_UNSUPPORTED', 'Этот формат значка не поддерживает перекрашивание')
+        length = int.from_bytes(source[palette:palette + 4], 'big'); start = palette + 8
+        entries = [source[start + i:start + i + 3] for i in range(0, length, 3)]
+        base = max((rgb for index, rgb in enumerate(entries) if (alpha[index] if index < len(alpha) else 255) >= 200), key=lambda rgb: sum((255 - value) ** 2 for value in rgb), default=b'\xff\xff\xff')
+        distance = sum((255 - value) ** 2 for value in base)
+        if not distance: return source
+        target = bytes.fromhex(color); output = bytearray(source)
+        for index, rgb in enumerate(entries):
+            if (alpha[index] if index < len(alpha) else 255) == 0: continue
+            weight = min(1, sum((255 - rgb[channel]) * (255 - base[channel]) for channel in range(3)) / distance)
+            for channel in range(3): output[start + index * 3 + channel] = round(255 + weight * (target[channel] - 255))
+        output[start + length:start + length + 4] = zlib.crc32(output[palette + 4:start + length]).to_bytes(4, 'big')
+        return bytes(output)
 
     async def report_by_external_id(self, external_report_id: str) -> dict[str, Any] | None:
         try:

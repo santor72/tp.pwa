@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
+from fastapi.responses import Response
 
 from app.dependencies import require_gis_csrf, require_gis_session
 from app.errors import ApiError
@@ -9,7 +10,7 @@ from app.report_photos import MAX_PHOTO_BYTES, validate_report_photo
 from app.schemas import SessionData
 
 router = APIRouter(prefix='/api/gis', tags=['gis'])
-DRAWABLE_GEOMETRIES = {'Point', 'LineString'}
+DRAWABLE_GEOMETRIES = {'Point', 'LineString', 'Polygon'}
 
 
 @router.get('/maps')
@@ -52,6 +53,10 @@ async def search(map_id: UUID, request: Request, q: str = Query(min_length=1, ma
 @router.get('/features/{feature_id}')
 async def feature(feature_id: UUID, request: Request, _: tuple[str, SessionData] = Depends(require_gis_session)):
     return await request.app.state.gis_client.feature(str(feature_id))
+
+@router.get('/assets/{asset_id}')
+async def asset(asset_id: UUID, request: Request, color: str | None = Query(default=None, pattern=r'^[a-fA-F0-9]{6}$'), _: tuple[str, SessionData] = Depends(require_gis_session)):
+    return Response(await request.app.state.gis_client.asset(str(asset_id), color), media_type='image/png', headers={'Cache-Control': 'private, max-age=3600'})
 
 
 @router.post('/reports')

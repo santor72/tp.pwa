@@ -254,6 +254,9 @@ input:focus, textarea:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px #dbea
 .gis-picker .gis-map-canvas { min-height: var(--gis-picker-map-height); }
 .gis-picker .gis-leaflet-map { height: var(--gis-picker-map-height); min-height: var(--gis-picker-map-height); }
 .gis-map-notice { margin: 0; color: #64748b; font-size: .8rem; }
+.gis-point-icon, .gis-point-pin { border: 0; background: transparent; }
+.gis-point-icon img { display: block; object-fit: contain; }
+.gis-point-pin span { display: block; background: var(--gis-point-color, #0288d1); border: 2px solid #fff; border-radius: 50% 50% 50% 0; box-shadow: 0 1px 4px #0f172a66; transform: rotate(-45deg); }
 .gis-picker-selection { display: grid; gap: .7rem; padding: .8rem; border: 1px solid #bfdbfe; border-radius: .9rem; background: #eff6ff; }
 .gis-picker-selection header { padding-bottom: .55rem; }
 .gis-picker-selection h3 { margin: .15rem 0 0; color: #172033; font-size: 1rem; }
