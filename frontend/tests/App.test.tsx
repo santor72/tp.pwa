@@ -416,7 +416,7 @@ describe('Capabilities', () => {
     expect(screen.getByText('Отчёт для ТехПортала').parentElement?.textContent).toContain('*')
   })
 
-  it('скрывает настройки, когда messenger_settings отключён', async () => {
+  it('оставляет настройки карты, когда messenger_settings отключён', async () => {
     const restrictedSession = { ...session, capabilities: { ...session.capabilities, messenger_settings: false } }
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       if (String(input) === '/api/auth/session') return json(restrictedSession)
@@ -427,7 +427,9 @@ describe('Capabilities', () => {
     render(<App />)
 
     await screen.findByRole('heading', { name: 'Заявки сегодня' })
-    expect(screen.queryByRole('button', { name: 'Настройки' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Настройки' }))
+    expect(await screen.findByLabelText('Высота карты')).toBeTruthy()
+    expect(screen.queryByText('Telegram')).toBeNull()
   })
 
   it('запрашивает общий список только после включения переключателя', async () => {

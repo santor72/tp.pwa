@@ -37,12 +37,34 @@ import {
 type AppScreen = 'loading' | 'login' | 'app'
 type AppTab = TicketDay | 'payments' | 'settings' | 'map'
 type PaymentScreen = 'address' | 'product' | 'client' | 'amount' | 'progress' | 'ambiguous' | 'result'
+type GisMapHeight = 'compact' | 'standard' | 'large' | 'custom'
 const SHOW_CLOSED_TICKETS_KEY = 'tp-pwa:show-closed-tickets'
 const TICKETS_SCOPE_KEY = 'tp-pwa:tickets-scope'
 const TICKETS_FILTER_KEY_PREFIX = 'tp-pwa:tickets-filter:'
 const GIS_SELECTED_MAP_KEY = 'tp-pwa.gis.selected-map'
 const GIS_MAP_VIEW_KEY = 'tp-pwa.gis.map-view'
+const GIS_MAP_HEIGHT_KEY = 'tp-pwa.gis.map-height'
+const GIS_MAP_HEIGHT_PERCENT_KEY = 'tp-pwa.gis.map-height-percent'
 const CONNECTION_COMPLETION_KEY_PREFIX = 'tp-pwa:connection-completion:'
+
+function storedGisMapHeight(): GisMapHeight {
+  try {
+    const value = window.localStorage.getItem(GIS_MAP_HEIGHT_KEY)
+    return value === 'compact' || value === 'large' || value === 'custom' ? value : 'standard'
+  } catch { return 'standard' }
+}
+
+function storedGisMapHeightPercent(): number {
+  try {
+    const value = Number(window.localStorage.getItem(GIS_MAP_HEIGHT_PERCENT_KEY))
+    return Number.isInteger(value) && value >= 35 && value <= 90 ? value : 60
+  } catch { return 60 }
+}
+
+function applyGisMapHeight(value: GisMapHeight, percent: number) {
+  document.documentElement.dataset.gisMapHeight = value
+  document.documentElement.style.setProperty('--gis-map-custom-height', `${percent}dvh`)
+}
 
 function connectionCompletionKey(ticketId: number, kind: Ticket['kind']) {
   return kind === 'connection' ? `${CONNECTION_COMPLETION_KEY_PREFIX}${ticketId}` : `tp-pwa:repair-completion:${ticketId}`
@@ -151,7 +173,7 @@ function paymentPhoneE164(value: string): string {
   return digits.startsWith('7') ? `+${digits}` : value
 }
 
-function Settings({ session }: { session: Session }) {
+function Settings({ session, gisAllowed, mapHeight, mapHeightPercent, onMapHeightChange, onMapHeightPercentChange }: { session: Session; gisAllowed: boolean; mapHeight: GisMapHeight; mapHeightPercent: number; onMapHeightChange: (value: GisMapHeight) => void; onMapHeightPercentChange: (value: number) => void }) {
   const [link, setLink] = useState<MessengerLink | null>(null)
   const [created, setCreated] = useState<MessengerLinkCreate | null>(null)
   const [loading, setLoading] = useState(false)
@@ -166,7 +188,7 @@ function Settings({ session }: { session: Session }) {
     } catch (cause) { setError(errorMessage(cause)) }
     finally { setLoading(false) }
   }
-  useEffect(() => { void refresh() }, [])
+  useEffect(() => { if (session.capabilities.messenger_settings) void refresh() }, [session.capabilities.messenger_settings])
   async function connect() {
     setLoading(true); setError('')
     try { setCreated(await api.createTelegramLink(session.csrf_token)); setLink(null) }
@@ -180,15 +202,20 @@ function Settings({ session }: { session: Session }) {
     finally { setLoading(false) }
   }
   return <section className="step-content settings-screen">
-    <div className="step-heading"><h1>Настройки</h1><p>Подключение рабочих сервисов</p></div>
-    <section className="panel telegram-linking">
-    <div><h2>Telegram</h2><p>{link ? 'Подключён' : 'Подключите бота к учётной записи'}</p></div>
-    {error && <ErrorBox text={error} />}
-    {loading && <p>Загрузка…</p>}
-    {!loading && link && <><p>{link.username ? `@${link.username}` : link.display_name || 'Подключённый аккаунт'}</p><button className="outline-button" onClick={disconnect}>Отключить</button></>}
-    {!loading && !link && !created && <button className="primary-button" onClick={connect}>Подключить Telegram</button>}
-    {!loading && created && <><p>Откройте ссылку до {formatDateTime(created.expires_at)}.</p><a className="primary-button telegram-link" href={created.deep_link}>Открыть Telegram</a><button className="outline-button" onClick={refresh}>Проверить статус</button><button className="outline-button" onClick={connect}>Создать новую ссылку</button></>}
-    </section>
+    <div className="step-heading"><h1>Настройки</h1><p>Параметры приложения и рабочих сервисов</p></div>
+    {gisAllowed && <section className="panel map-size-settings">
+      <div><h2>Размер карты</h2><p>Выберите высоту карты в обычном режиме. Разворот ⛶ всегда открывает её на весь экран.</p></div>
+      <label className="field"><span>Высота карты</span><select aria-label="Высота карты" value={mapHeight} onChange={event => onMapHeightChange(event.target.value as GisMapHeight)}><option value="compact">Компактная</option><option value="standard">Стандартная</option><option value="large">Большая</option><option value="custom">Точно</option></select></label>
+      {mapHeight === 'custom' && <label className="field map-size-slider"><span>Точная высота: {mapHeightPercent}% экрана</span><input aria-label="Точная высота карты" type="range" min="35" max="90" step="1" value={mapHeightPercent} onChange={event => onMapHeightPercentChange(Number(event.target.value))} /><output>{mapHeightPercent}%</output></label>}
+    </section>}
+    {session.capabilities.messenger_settings && <section className="panel telegram-linking">
+      <div><h2>Telegram</h2><p>{link ? 'Подключён' : 'Подключите бота к учётной записи'}</p></div>
+      {error && <ErrorBox text={error} />}
+      {loading && <p>Загрузка…</p>}
+      {!loading && link && <><p>{link.username ? `@${link.username}` : link.display_name || 'Подключённый аккаунт'}</p><button className="outline-button" onClick={disconnect}>Отключить</button></>}
+      {!loading && !link && !created && <button className="primary-button" onClick={connect}>Подключить Telegram</button>}
+      {!loading && created && <><p>Откройте ссылку до {formatDateTime(created.expires_at)}.</p><a className="primary-button telegram-link" href={created.deep_link}>Открыть Telegram</a><button className="outline-button" onClick={refresh}>Проверить статус</button><button className="outline-button" onClick={connect}>Создать новую ссылку</button></>}
+    </section>}
   </section>
 }
 
@@ -1135,9 +1162,20 @@ function MapCanvas({ data, position, view, onViewChange, onBoundsChange, onSelec
   const features = data?.features ?? []
   const coordinates = features.flatMap(feature => coordinatePairs(feature.geometry))
   const [basemap, setBasemap] = useState<GisBasemap>('streets')
+  const [fullscreen, setFullscreen] = useState(false)
+  const canvasRef = useRef<HTMLDivElement>(null)
   const setZoom = (delta: number) => onViewChange({ ...view, zoom: Math.max(3, Math.min(19, Math.round(view.zoom) + delta)) })
   const tileUrl = basemapTileUrl(basemap)
-  return <div className="gis-map-canvas" role="application" aria-label="Карта сети">
+  useEffect(() => {
+    const updateFullscreen = () => setFullscreen(document.fullscreenElement === canvasRef.current)
+    document.addEventListener('fullscreenchange', updateFullscreen)
+    return () => document.removeEventListener('fullscreenchange', updateFullscreen)
+  }, [])
+  const toggleFullscreen = async () => {
+    if (document.fullscreenElement) await document.exitFullscreen()
+    else await canvasRef.current?.requestFullscreen()
+  }
+  return <div ref={canvasRef} className="gis-map-canvas" role="application" aria-label="Карта сети">
     <MapContainer center={[view.latitude, view.longitude]} zoom={view.zoom} zoomControl={false} scrollWheelZoom className="gis-leaflet-map">
       <MapEvents view={view} onViewChange={onViewChange} onBoundsChange={onBoundsChange} />
       {tileUrl && <TileLayer url={tileUrl} attribution={basemap === 'streets' ? '&copy; OpenStreetMap' : 'Tiles &copy; Esri'} />}
@@ -1150,6 +1188,7 @@ function MapCanvas({ data, position, view, onViewChange, onBoundsChange, onSelec
       <button type="button" onClick={() => setZoom(-1)} aria-label="Уменьшить масштаб">−</button>
       <button type="button" onClick={onLocate} disabled={locating} aria-label="Показать моё местоположение" title="Показать моё местоположение">⌖</button>
       <button type="button" onClick={() => coordinates.length && onViewChange(initialMapView(coordinates))} disabled={!coordinates.length} aria-label="Показать загруженные объекты">⌂</button>
+      <button type="button" onClick={() => void toggleFullscreen()} aria-label={fullscreen ? 'Свернуть карту' : 'Открыть карту на весь экран'} title={fullscreen ? 'Свернуть карту' : 'На весь экран'}>{fullscreen ? '⊡' : '⛶'}</button>
     </div>
     <label className="gis-basemap-picker" onPointerDown={event => event.stopPropagation()}><span>Подложка</span><select value={basemap} onChange={event => setBasemap(event.target.value as GisBasemap)} aria-label="Подложка карты"><option value="streets">Схема</option><option value="satellite">Спутник</option><option value="none">Без подложки</option></select></label>
   </div>
@@ -1390,18 +1429,21 @@ function MapScreen({ session }: { session: Session }) {
 
 function AppShell({ session, onLogout }: { session: Session; onLogout: () => void }) {
   const [tab, setTab] = useState<AppTab>('today')
+  const [mapHeight, setMapHeight] = useState<GisMapHeight>(storedGisMapHeight)
+  const [mapHeightPercent, setMapHeightPercent] = useState(storedGisMapHeightPercent)
   const paymentsAllowed = session.capabilities.payments
   const gisAllowed = session.capabilities.gis
   const messengerSettingsAllowed = session.capabilities.messenger_settings
   const ticketDay: TicketDay = tab === 'today' || tab === 'tomorrow' ? tab : 'today'
+  useEffect(() => { applyGisMapHeight(mapHeight, mapHeightPercent); try { window.localStorage.setItem(GIS_MAP_HEIGHT_KEY, mapHeight); window.localStorage.setItem(GIS_MAP_HEIGHT_PERCENT_KEY, String(mapHeightPercent)) } catch { /* storage may be unavailable */ } }, [mapHeight, mapHeightPercent])
   return (
     <main className="app-page with-navigation">
       <header className="app-header">
         <div><strong>ТехПортал</strong><span>{session.user.first_name || session.user.email}</span></div>
         <div className="header-actions"><button className="logout-button" onClick={onLogout}>Выйти</button></div>
       </header>
-      {tab === 'settings' && messengerSettingsAllowed
-        ? <Settings session={session} />
+      {tab === 'settings' && (messengerSettingsAllowed || gisAllowed)
+        ? <Settings session={session} gisAllowed={gisAllowed} mapHeight={mapHeight} mapHeightPercent={mapHeightPercent} onMapHeightChange={setMapHeight} onMapHeightPercentChange={setMapHeightPercent} />
         : tab === 'payments' && paymentsAllowed
         ? <Payments session={session} />
         : tab === 'map' && gisAllowed
@@ -1412,7 +1454,7 @@ function AppShell({ session, onLogout }: { session: Session; onLogout: () => voi
         <button className={tab === 'tomorrow' ? 'active' : ''} onClick={() => setTab('tomorrow')} aria-label="Завтра" title="Завтра"><span aria-hidden="true">◐</span></button>
         {gisAllowed && <button className={tab === 'map' ? 'active' : ''} onClick={() => setTab('map')} aria-label="Карта" title="Карта"><span aria-hidden="true">⌖</span></button>}
         {paymentsAllowed && <button className={tab === 'payments' ? 'active' : ''} onClick={() => setTab('payments')} aria-label="Оплата" title="Оплата"><span aria-hidden="true">₽</span></button>}
-        {messengerSettingsAllowed && <button className={tab === 'settings' ? 'active' : ''} onClick={() => setTab('settings')} aria-label="Настройки" title="Настройки"><span aria-hidden="true">⚙</span></button>}
+        {(messengerSettingsAllowed || gisAllowed) && <button className={tab === 'settings' ? 'active' : ''} onClick={() => setTab('settings')} aria-label="Настройки" title="Настройки"><span aria-hidden="true">⚙</span></button>}
       </nav>
     </main>
   )
