@@ -37,6 +37,7 @@ class FakeTickets:
         self.asserted = []
         self.marked = []
         self.recorded = True
+        self.gis_context_calls = []
 
     async def assert_connection_assigned(self, user_id, day, ticket_id):
         self.asserted.append((user_id, day, ticket_id))
@@ -55,6 +56,10 @@ class FakeTickets:
 
     async def ticket_completion_recorded(self, user_id, ticket_id, comment, ticket_kind):
         return self.recorded
+
+    async def gis_subscriber(self, user_id, ticket_id, ticket_kind):
+        self.gis_context_calls.append((user_id, ticket_id, ticket_kind))
+        return {'login': '35509398', 'address': 'СНТ Волга, дом 12, кв. 34'}
 
 
 class FakeStorage:
@@ -350,6 +355,8 @@ async def test_selected_feature_is_checked_and_sent_to_gis_after_techportal_mark
     assert metadata['feature_id'] == str(feature_id)
     assert metadata['completion_id'] == str(operation.id)
     assert metadata['text'] == 'GIS'
+    assert metadata['subscriber'] == {'login': '35509398', 'address': 'СНТ Волга, дом 12, кв. 34'}
+    assert subject._tickets.gis_context_calls == [('17', 12, 'connection')]
     assert metadata['technician'] == {'id': '17', 'name': 'Монтажник', 'last_name': ''}
     assert subject._tickets.marked[0][3] == 'Монтажник\nТП'
     assert photos == []

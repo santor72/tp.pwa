@@ -278,6 +278,7 @@ class ConnectionCompletionOperation(Base):
     external_report_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), unique=True)
     techportal_text: Mapped[str] = mapped_column(Text, nullable=False, default='')
     gis_text: Mapped[str] = mapped_column(Text, nullable=False, default='')
+    subscriber: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     photos: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     techportal_comment: Mapped[str | None] = mapped_column(Text)
     completion_status: Mapped[str] = mapped_column(String(32), nullable=False, default='prepared')

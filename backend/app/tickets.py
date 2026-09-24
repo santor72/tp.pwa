@@ -244,6 +244,24 @@ class TicketService:
     async def dial(self, phone: str, upstream_cookies: dict[str, str]) -> None:
         await self._client.dial(phone, upstream_cookies)
 
+    async def gis_subscriber(
+        self,
+        user_id: int | str,
+        ticket_id: int,
+        ticket_kind: Literal["connection", "repair"],
+    ) -> dict[str, str]:
+        raw_ticket = await self._client.ticket_by_id(ticket_id)
+        if raw_ticket is None:
+            raise TicketNotFoundError()
+        ticket = TechPortalTicket.model_validate(raw_ticket)
+        if (not self._is_master(ticket, user_id)
+                or (CONNECTION_TAG in ticket.tags) != (ticket_kind == "connection")):
+            raise TicketNotFoundError()
+        return {
+            "login": (ticket.clientLogin or "").strip(),
+            "address": self._address_text(ticket),
+        }
+
     async def _user_names(self) -> dict[str, str]:
         cached = await self._cache.get_json(self.users_cache_key)
         if isinstance(cached, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in cached.items()):

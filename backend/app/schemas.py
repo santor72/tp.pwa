@@ -297,6 +297,7 @@ class TechPortalTicket(BaseModel):
     description: str | None = None
     tags: dict[str, Any] = Field(default_factory=dict)
     clientName: str | None = None
+    clientLogin: str | None = None
     clientPhone: str | None = None
     phones: list[str] = Field(default_factory=list)
     address: TechPortalAddress | None = None

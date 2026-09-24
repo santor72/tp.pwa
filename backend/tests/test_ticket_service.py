@@ -72,6 +72,7 @@ def ticket(
         "description": "Описание работ",
         "tags": tags if tags is not None else {"Новое подключение": {}, "Солнечногорск": {}},
         "clientName": "Денис Денис",
+        "clientLogin": "35509398",
         "clientPhone": "79254553958",
         "address": {
             "externalAddress": "СНТ Волга, участок 96",
@@ -334,3 +335,13 @@ def test_phone_normalization_deduplicates_equivalent_numbers_and_keeps_unparseab
     source.phones = ["+7 925 455-39-58", "неизвестный", "неизвестный"]
 
     assert TicketService._phones(source) == ["+79254553958", "неизвестный"]
+
+
+@pytest.mark.asyncio
+async def test_gis_subscriber_contains_client_login_and_address() -> None:
+    source = ticket()
+    ticket_service = service(FakeTechPortal([source]))
+
+    result = await ticket_service.gis_subscriber(87, source.id, 'connection')
+
+    assert result == {'login': '35509398', 'address': 'СНТ Волга, участок 96, дом 12, кв. 34'}

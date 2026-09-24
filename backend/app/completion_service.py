@@ -44,13 +44,16 @@ class ConnectionCompletionService:
             raise ApiError(503, 'GIS_PHOTO_STORAGE_NOT_CONFIGURED', 'Для отправки фотографий в GIS требуется настроенное S3-хранилище')
         if photos and not self.photos_available and not feature_id:
             raise ApiError(503, 'PHOTO_STORAGE_NOT_CONFIGURED', 'Загрузка фотографий для заявок не настроена')
+        subscriber = await self._tickets.gis_subscriber(
+            actor.techportal_user_id, ticket_id, ticket_kind,
+        ) if feature_id else {}
         feature_snapshot = await self._gis.feature(str(feature_id)) if feature_id else {}
         operation, created = await self._repository.create_or_get(
             idempotency_key=idempotency_key, ticket_id=ticket_id, ticket_kind=ticket_kind, day=day, user_id=actor.user_id,
             technician_external_id=actor.techportal_user_id, technician_name=technician_name,
             technician_last_name=technician_last_name,
             feature_id=feature_id, feature_snapshot=feature_snapshot, external_report_id=uuid4() if feature_id else None,
-            techportal_text=techportal_text, gis_text=gis_text, photos=[], completion_status='prepared',
+            techportal_text=techportal_text, gis_text=gis_text, subscriber=subscriber, photos=[], completion_status='prepared',
             gis_status='not_ready' if feature_id else 'not_requested',
         )
         if not created:
@@ -150,6 +153,7 @@ class ConnectionCompletionService:
                     'last_name': operation.technician_last_name,
                 },
                 'occurred_at': operation.created_at.astimezone(UTC).isoformat().replace('+00:00', 'Z'),
+                'subscriber': operation.subscriber,
                 'text': operation.gis_text,
             }, photos)
         except ServiceUnavailableError as exc:
