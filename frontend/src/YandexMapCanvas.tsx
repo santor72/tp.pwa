@@ -59,7 +59,7 @@ export const YandexMapCanvas: GisMapCanvas = ({ data, position, view, onViewChan
     }).then(sdk => {
       if (!live || !node.current) return
       ymaps.current = sdk
-      map.current = new sdk.Map(node.current, { center: [viewRef.current.latitude, viewRef.current.longitude], zoom: viewRef.current.zoom, type: `yandex#${basemap}` }, { suppressMapOpenBlock: true })
+      map.current = new sdk.Map(node.current, { center: [viewRef.current.latitude, viewRef.current.longitude], zoom: viewRef.current.zoom, type: `yandex#${basemap}`, controls: [] }, { suppressMapOpenBlock: true })
       featureObjects.current = new sdk.GeoObjectCollection()
       positionObject.current = new sdk.GeoObjectCollection()
       map.current.geoObjects.add(featureObjects.current)
