@@ -103,7 +103,7 @@ def test_features_keeps_only_points_and_lines():
     assert gis.feature_calls == [(str(map_id), '37.1,55.0,37.4,55.3', 'layer-1')]
 
 
-def test_features_clusters_points_below_detail_zoom():
+def test_features_marks_points_noninteractive_below_detail_zoom():
     app = FastAPI()
     gis = CapturingGisClient()
     app.state.gis_client = gis
@@ -120,9 +120,8 @@ def test_features_clusters_points_below_detail_zoom():
 
     assert response.status_code == 200
     features = response.json()['features']
-    assert [feature['id'] for feature in features] == ['line', 'cluster::8:8']
-    assert features[1]['properties']['count'] == 2
-    assert features[1]['properties']['bbox'] == [37.2, 55.1, 37.21, 55.11]
+    assert [feature['id'] for feature in features] == ['point', 'point-2', 'line']
+    assert [feature['properties']['interactive'] for feature in features if feature['geometry']['type'] == 'Point'] == [False, False]
 
 
 def test_basemap_returns_official_sdk_url_only_when_key_is_configured():

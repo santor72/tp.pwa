@@ -89,7 +89,7 @@ export type GisFeatureStyle = {
   lineColor?: string; lineWidth?: number; lineOpacity?: number
   fillColor?: string; fillOpacity?: number
 }
-export type GisFeature = { type: 'Feature'; id: string; geometry: { type: 'Point' | 'LineString' | 'Polygon'; coordinates: unknown }; properties: { id: string; layer_id: string; title?: string; number?: number; kind: string; cluster?: boolean; count?: number; bbox?: [number, number, number, number] } & GisFeatureStyle }
+export type GisFeature = { type: 'Feature'; id: string; geometry: { type: 'Point' | 'LineString' | 'Polygon'; coordinates: unknown }; properties: { id: string; layer_id: string; title?: string; number?: number; kind: string; interactive?: boolean } & GisFeatureStyle }
 export type GisFeatureCollection = { type: 'FeatureCollection'; truncated: boolean; limit: number; features: GisFeature[] }
 export type GisFeatureDetails = { id: string; layer_id: string; map_id: string; layer_name: string; title: string; number: number; kind: string; description: string; geometry: GisFeature['geometry']; style: Record<string, unknown>; version: number }
 export type GisReportReceipt = { id: string; external_report_id: string; repeated: boolean; retention_until: string | null }

@@ -46,10 +46,10 @@ export const YandexMapCanvas: GisMapCanvas = ({ data, position, view, onViewChan
   const [loading, setLoading] = useState(true); const [error, setError] = useState(''); const [fullscreen, setFullscreen] = useState(false)
   const [attempt, setAttempt] = useState(0); const [mapVersion, setMapVersion] = useState(0)
   const root = useRef<HTMLDivElement>(null)
-  const selectRef = useRef(onSelect); const onViewChangeRef = useRef(onViewChange); const initialMapViewRef = useRef(initialMapView)
+  const selectRef = useRef(onSelect)
   const pointFeatures = useRef(new Map<string, GisFeature>()); const pointVersions = useRef(new Map<string, string>()); const lineVersions = useRef(new Map<string, string>())
   const interacting = useRef(false); const pendingData = useRef<GisMapCanvasProps['data'] | undefined>(undefined); const [renderedData, setRenderedData] = useState(data)
-  viewRef.current = view; selectRef.current = onSelect; onViewChangeRef.current = onViewChange; initialMapViewRef.current = initialMapView
+  viewRef.current = view; selectRef.current = onSelect
 
   useEffect(() => {
     if (interacting.current) { pendingData.current = data; return }
@@ -77,12 +77,7 @@ export const YandexMapCanvas: GisMapCanvas = ({ data, position, view, onViewChan
       pointObjects.current.objects.events.add('click', (event: any) => {
         const feature = pointFeatures.current.get(String(event.get('objectId')))
         if (!feature) return
-        if (feature.properties.cluster) {
-          const bounds = feature.properties.bbox
-          if (bounds) onViewChangeRef.current(initialMapViewRef.current([[bounds[0], bounds[1]], [bounds[2], bounds[3]]]))
-          return
-        }
-        selectRef.current(feature)
+        if (feature.properties.interactive !== false) selectRef.current(feature)
       })
       const report = () => {
         const center = map.current.getCenter(); const bounds = map.current.getBounds()
@@ -138,13 +133,13 @@ export const YandexMapCanvas: GisMapCanvas = ({ data, position, view, onViewChan
     }
     sync(points, pointVersions, nextPoints, feature => {
       const props = feature.properties
-      if (props.cluster) return { preset: 'islands#blueCircleIcon', iconColor: '#2563eb', iconContent: String(props.count ?? '') }
+      const interactivity = props.interactive === false ? { interactivityModel: 'default#transparent' } : {}
       const scale = props.iconScale || 1; const markerColor = color(props.iconColor, '#0288d1'); const assetId = props.iconId
       if (assetId && UUID.test(assetId)) {
         const suffix = props.recolorIcon ? `?color=${markerColor.slice(1)}` : ''
-        return { iconLayout: 'default#image', iconImageHref: `/api/gis/assets/${assetId}${suffix}`, iconImageSize: [32 * scale, 32 * scale], iconImageOffset: [-16 * scale, -16 * scale] }
+        return { ...interactivity, iconLayout: 'default#image', iconImageHref: `/api/gis/assets/${assetId}${suffix}`, iconImageSize: [32 * scale, 32 * scale], iconImageOffset: [-16 * scale, -16 * scale] }
       }
-      return props.markerShape === 'pin' ? { preset: 'islands#blueDotIcon', iconColor: markerColor } : { preset: 'islands#circleIcon', iconColor: markerColor, iconImageSize: [22 * scale, 22 * scale] }
+      return props.markerShape === 'pin' ? { ...interactivity, preset: 'islands#blueDotIcon', iconColor: markerColor } : { ...interactivity, preset: 'islands#circleIcon', iconColor: markerColor, iconImageSize: [22 * scale, 22 * scale] }
     })
     pointFeatures.current = nextPoints
     sync(lines, lineVersions, nextLines, feature => {
