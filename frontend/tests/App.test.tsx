@@ -80,7 +80,7 @@ beforeEach(() => {
       marker.onclick = () => this.handlers.click?.({ get: () => feature.id })
       this.markers.set(feature.id, marker); container?.append(marker)
     }
-    remove(id: string) { this.markers.get(id)?.remove(); this.markers.delete(id) }
+    remove(ids: string | string[]) { for (const id of Array.isArray(ids) ? ids : [ids]) { this.markers.get(id)?.remove(); this.markers.delete(id) } }
   }
   class Map {
     geoObjects = { add: () => undefined }
