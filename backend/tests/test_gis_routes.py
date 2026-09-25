@@ -30,6 +30,7 @@ class CapturingGisClient:
             'type': 'FeatureCollection', 'truncated': False, 'limit': 100,
             'features': [
                 {'type': 'Feature', 'id': 'point', 'geometry': {'type': 'Point', 'coordinates': [37.2, 55.1]}},
+                {'type': 'Feature', 'id': 'point-2', 'geometry': {'type': 'Point', 'coordinates': [37.21, 55.11]}},
                 {'type': 'Feature', 'id': 'line', 'geometry': {'type': 'LineString', 'coordinates': [[37.2, 55.1], [37.3, 55.2]]}},
                 {'type': 'Feature', 'id': 'polygon', 'geometry': {'type': 'Polygon', 'coordinates': [[[37.2, 55.1], [37.3, 55.2], [37.2, 55.1]]]}},
             ],
@@ -82,7 +83,7 @@ def test_map_report_uses_server_author_and_reserved_ticket_id():
     assert gis.photos[0][1].startswith(b'\xff\xd8\xff')
 
 
-def test_features_keeps_all_supported_geojson_geometries():
+def test_features_keeps_only_points_and_lines():
     app = FastAPI()
     gis = CapturingGisClient()
     app.state.gis_client = gis
@@ -98,8 +99,30 @@ def test_features_keeps_all_supported_geojson_geometries():
     })
 
     assert response.status_code == 200
-    assert [feature['id'] for feature in response.json()['features']] == ['point', 'line', 'polygon']
+    assert [feature['id'] for feature in response.json()['features']] == ['point', 'point-2', 'line']
     assert gis.feature_calls == [(str(map_id), '37.1,55.0,37.4,55.3', 'layer-1')]
+
+
+def test_features_clusters_points_below_detail_zoom():
+    app = FastAPI()
+    gis = CapturingGisClient()
+    app.state.gis_client = gis
+    app.include_router(router)
+
+    async def session_override():
+        return 'session', None
+
+    app.dependency_overrides[require_gis_data_session] = session_override
+    map_id = uuid4()
+    response = TestClient(app).get(f'/api/gis/maps/{map_id}/features', params={
+        'bbox': '37.1,55.0,37.4,55.3', 'layers': 'layer-1', 'zoom': 14,
+    })
+
+    assert response.status_code == 200
+    features = response.json()['features']
+    assert [feature['id'] for feature in features] == ['line', 'cluster::8:8']
+    assert features[1]['properties']['count'] == 2
+    assert features[1]['properties']['bbox'] == [37.2, 55.1, 37.21, 55.11]
 
 
 def test_basemap_returns_official_sdk_url_only_when_key_is_configured():

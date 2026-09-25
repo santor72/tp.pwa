@@ -70,6 +70,18 @@ beforeEach(() => {
     add(item: ReturnType<typeof object>) { this.items.push(item); const marker = document.createElement('button'); marker.className = 'ymaps-feature'; marker.onclick = () => item._handlers.click?.(); container?.append(marker); return this }
     removeAll() { this.items = []; container?.querySelectorAll('.ymaps-feature').forEach(node => node.remove()) }
   }
+  class ObjectManager {
+    private handlers: Record<string, (event: { get: (name: string) => string }) => void> = {}
+    private markers = new globalThis.Map<string, HTMLButtonElement>()
+    objects = { events: { add: (name: string, handler: (event: { get: (name: string) => string }) => void) => { this.handlers[name] = handler } } }
+    add(feature: { id: string }) {
+      const marker = document.createElement('button')
+      marker.className = 'ymaps-feature'
+      marker.onclick = () => this.handlers.click?.({ get: () => feature.id })
+      this.markers.set(feature.id, marker); container?.append(marker)
+    }
+    remove(id: string) { this.markers.get(id)?.remove(); this.markers.delete(id) }
+  }
   class Map {
     geoObjects = { add: () => undefined }
     constructor(element: HTMLElement) { container = element }
@@ -80,7 +92,7 @@ beforeEach(() => {
     events = { add() {} }
   }
   function GeoObject() { return object() }
-  vi.stubGlobal('ymaps', { ready: (callback: () => void) => callback(), Map, GeoObjectCollection: Collection, Circle: GeoObject, Placemark: GeoObject, Polygon: GeoObject, Polyline: GeoObject })
+  vi.stubGlobal('ymaps', { ready: (callback: () => void) => callback(), Map, ObjectManager, GeoObjectCollection: Collection, Circle: GeoObject, Placemark: GeoObject, Polygon: GeoObject, Polyline: GeoObject })
 })
 
 describe('Платёжный терминал', () => {
@@ -363,8 +375,9 @@ describe('Карта сети', () => {
     expect(screen.getByRole('button', { name: 'Увеличить масштаб' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Уменьшить масштаб' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Показать загруженные объекты' })).toBeTruthy()
-    expect(screen.getByRole('combobox', { name: 'Подложка карты' })).toBeTruthy()
-    fireEvent.change(screen.getByRole('combobox', { name: 'Подложка карты' }), { target: { value: 'hybrid' } })
+    const basemapPicker = screen.getByRole('combobox', { name: 'Подложка карты' })
+    await waitFor(() => expect(basemapPicker.disabled).toBe(false))
+    fireEvent.change(basemapPicker, { target: { value: 'hybrid' } })
     expect(localStorage.getItem('tp-pwa.gis.basemap')).toBe('hybrid')
     const map = screen.getByRole('application', { name: 'Карта сети' })
     await waitFor(() => expect(map.querySelector('.ymaps-feature')).not.toBeNull())

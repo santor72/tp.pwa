@@ -13,6 +13,7 @@ export type GisMapCanvasProps = {
   view: GisMapView
   onViewChange: (view: GisMapView) => void
   onBoundsChange: (bounds: GisBounds) => void
+  onInteractionChange: (active: boolean) => void
   onSelect: (feature: GisFeature) => void
   onLocate: () => void
   locating: boolean

@@ -642,6 +642,7 @@ function GisFeaturePicker({ value, onChange }: { value: string; onChange: (value
   const [mapView, setMapView] = useState<GisMapView | null>(null)
   const [fallbackBounds, setFallbackBounds] = useState<[number, number, number, number] | null>(null)
   const [viewportBounds, setViewportBounds] = useState<[number, number, number, number] | null>(null)
+  const [mapInteracting, setMapInteracting] = useState(false)
   const [position, setPosition] = useState<GisPosition | null>(null)
   const [locating, setLocating] = useState(false)
   const [locationNotice, setLocationNotice] = useState('')
@@ -672,7 +673,7 @@ function GisFeaturePicker({ value, onChange }: { value: string; onChange: (value
   useEffect(() => {
     if (!open || !mapId || !maps.length) return
     let active = true
-    setLoading(true); setError(''); setData(null); setLayers([]); setFallbackBounds(null); setViewportBounds(null); setMapView(null)
+    setLoading(true); setError(''); setData(null); setLayers([]); setFallbackBounds(null); setViewportBounds(null); setMapView(null); setMapInteracting(false)
     initialPositionApplied.current = false
     savedViewRestored.current = false
     try {
@@ -714,11 +715,14 @@ function GisFeaturePicker({ value, onChange }: { value: string; onChange: (value
     setViewportBounds(previous => previous?.every((item, index) => Math.abs(item - bounds[index]) < .000001) ? previous : bounds)
   }, [])
   useEffect(() => {
-    if (!open || !mapId || !viewportBounds || !layers.length) return
+    if (!open || !mapId || !viewportBounds || !layers.length || mapInteracting) return
     let active = true
-    const timer = window.setTimeout(() => api.gisFeatures(mapId, viewportBounds, layers.map(layer => layer.id)).then(result => active && setData(result)).catch(cause => active && setError(errorMessage(cause))), 250)
-    return () => { active = false; window.clearTimeout(timer) }
-  }, [open, mapId, layers.map(layer => layer.id).join(','), viewportBounds?.join(',')])
+    const controller = new AbortController()
+    const timer = window.setTimeout(() => api.gisFeatures(mapId, viewportBounds, layers.map(layer => layer.id), mapView?.zoom ?? GIS_DEFAULT_ZOOM, controller.signal).then(result => active && setData(result)).catch(cause => {
+      if (active && !(cause instanceof DOMException && cause.name === 'AbortError')) setError(errorMessage(cause))
+    }), 250)
+    return () => { active = false; window.clearTimeout(timer); controller.abort() }
+  }, [open, mapId, layers.map(layer => layer.id).join(','), viewportBounds?.join(','), mapView?.zoom, mapInteracting])
   useEffect(() => {
     if (!open || !navigator.geolocation) { if (open) setLocationNotice('Геолокация не поддерживается устройством'); return }
     const watch = navigator.geolocation.watchPosition(value => {
@@ -759,7 +763,7 @@ function GisFeaturePicker({ value, onChange }: { value: string; onChange: (value
         {error && <ErrorBox text={error} />}
         {!selected && <>
           {locationNotice && <p className="gis-map-notice">{locationNotice}</p>}
-          {mapView && <MapCanvas data={data} position={position} view={mapView} onViewChange={handleViewChange} onBoundsChange={updateViewportBounds} onSelect={openFeature} onLocate={locate} locating={locating} />}
+          {mapView && <MapCanvas data={data} position={position} view={mapView} onViewChange={handleViewChange} onBoundsChange={updateViewportBounds} onInteractionChange={setMapInteracting} onSelect={openFeature} onLocate={locate} locating={locating} />}
           {data?.truncated && <div className="error-box">Показана не вся сеть. Уточните область на карте.</div>}
         </>}
         {selected && <section className="gis-picker-selection" aria-label="Подтверждение объекта GIS">
@@ -1245,6 +1249,7 @@ function MapScreen({ session }: { session: Session }) {
   const [fallbackBounds, setFallbackBounds] = useState<[number, number, number, number] | null>(null)
   const [mapView, setMapView] = useState<GisMapView | null>(null)
   const [viewportBounds, setViewportBounds] = useState<[number, number, number, number] | null>(null)
+  const [mapInteracting, setMapInteracting] = useState(false)
   const [locationNotice, setLocationNotice] = useState('')
   const [locating, setLocating] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -1270,7 +1275,7 @@ function MapScreen({ session }: { session: Session }) {
   useEffect(() => {
     if (!current) return
     let active = true
-    setLoading(true); setError(''); setData(null); setSelected(null); setSelectedDetails(null); setFallbackBounds(null); setMapView(null); setViewportBounds(null)
+    setLoading(true); setError(''); setData(null); setSelected(null); setSelectedDetails(null); setFallbackBounds(null); setMapView(null); setViewportBounds(null); setMapInteracting(false)
     initialPositionApplied.current = false
     savedViewRestored.current = false
     try {
@@ -1308,12 +1313,15 @@ function MapScreen({ session }: { session: Session }) {
     setViewportBounds(previous => previous?.every((value, index) => Math.abs(value - bounds[index]) < .000001) ? previous : bounds)
   }, [])
   useEffect(() => {
-    if (!current || !layers.length || !viewportBounds) return
+    if (!current || !layers.length || !viewportBounds || mapInteracting) return
     let active = true
     const layerIds = layers.map(layer => layer.id)
-    const timer = window.setTimeout(() => api.gisFeatures(current.id, viewportBounds, layerIds).then(result => active && setData(result)).catch(cause => active && setError(errorMessage(cause))), 250)
-    return () => { active = false; window.clearTimeout(timer) }
-  }, [current?.id, layers.map(layer => layer.id).join(','), viewportBounds?.join(',')])
+    const controller = new AbortController()
+    const timer = window.setTimeout(() => api.gisFeatures(current.id, viewportBounds, layerIds, mapView?.zoom ?? GIS_DEFAULT_ZOOM, controller.signal).then(result => active && setData(result)).catch(cause => {
+      if (active && !(cause instanceof DOMException && cause.name === 'AbortError')) setError(errorMessage(cause))
+    }), 250)
+    return () => { active = false; window.clearTimeout(timer); controller.abort() }
+  }, [current?.id, layers.map(layer => layer.id).join(','), viewportBounds?.join(','), mapView?.zoom, mapInteracting])
   useEffect(() => {
     if (!navigator.geolocation) { setLocationNotice('Геолокация не поддерживается устройством'); return }
     const watch = navigator.geolocation.watchPosition(
@@ -1365,7 +1373,7 @@ function MapScreen({ session }: { session: Session }) {
     {!loading && maps.length === 0 && <div className="panel empty-state">Нет доступных карт</div>}
     {maps.length > 1 && <label className="field"><span>Карта</span><select value={current?.id ?? ''} onChange={event => setCurrent(maps.find(map => map.id === event.target.value) ?? null)}>{maps.map(map => <option key={map.id} value={map.id}>{map.name}</option>)}</select></label>}
     {showLayerSelector && layers.length > 0 && <details className="gis-layers-panel"><summary>Слои <span>{selectedLayers.length} из {layers.length}</span></summary><div className="gis-layers">{layers.map(layer => <label key={layer.id}><input type="checkbox" checked={selectedLayers.includes(layer.id)} onChange={() => toggleLayer(layer.id)} />{layer.name}</label>)}</div></details>}
-    {mapView && <MapCanvas data={data} position={position} view={mapView} onViewChange={handleViewChange} onBoundsChange={updateViewportBounds} onSelect={openFeature} onLocate={locate} locating={locating} />}
+    {mapView && <MapCanvas data={data} position={position} view={mapView} onViewChange={handleViewChange} onBoundsChange={updateViewportBounds} onInteractionChange={setMapInteracting} onSelect={openFeature} onLocate={locate} locating={locating} />}
     {data?.truncated && <div className="error-box">Показана не вся сеть. Уточните область на карте.</div>}
     <GisFeatureCard key={selected?.id} feature={selected} details={selectedDetails} loading={detailsLoading} error={detailsError} csrfToken={session.csrf_token} onClose={closeFeature} />
   </section>

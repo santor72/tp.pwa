@@ -55,6 +55,7 @@ class Settings(BaseSettings):
     gis_api_token: SecretStr = SecretStr('')
     yandex_maps_api_key: SecretStr = SecretStr('')
     gis_map_provider: Literal['yandex'] = 'yandex'
+    gis_point_detail_zoom: int = Field(default=15, ge=1, le=23)
     gis_timeout_seconds: float = Field(default=20.0, gt=0, le=120)
     gis_icon_cache_dir: str = '/app/.cache/gis-icons'
     gis_icon_cache_ttl_seconds: int = Field(default=31_536_000, gt=0)

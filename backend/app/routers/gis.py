@@ -11,7 +11,46 @@ from app.report_photos import MAX_PHOTO_BYTES, validate_report_photo
 from app.schemas import SessionData
 
 router = APIRouter(prefix='/api/gis', tags=['gis'])
-DRAWABLE_GEOMETRIES = {'Point', 'LineString', 'Polygon'}
+DRAWABLE_GEOMETRIES = {'Point', 'LineString'}
+POINT_CLUSTER_GRID_SIZE = 24
+
+
+def cluster_points(features: list[dict], bbox: str) -> list[dict]:
+    west, south, east, north = (float(value) for value in bbox.split(','))
+    width = max(east - west, 0.000001)
+    height = max(north - south, 0.000001)
+    groups: dict[tuple[str, int, int], list[dict]] = {}
+    other: list[dict] = []
+    for feature in features:
+        geometry = feature.get('geometry')
+        if not isinstance(geometry, dict) or geometry.get('type') != 'Point':
+            other.append(feature)
+            continue
+        coordinates = geometry.get('coordinates')
+        if not isinstance(coordinates, list) or len(coordinates) < 2 or not all(isinstance(value, (int, float)) for value in coordinates[:2]):
+            continue
+        properties = feature.get('properties') if isinstance(feature.get('properties'), dict) else {}
+        cell_x = min(POINT_CLUSTER_GRID_SIZE - 1, max(0, int((coordinates[0] - west) / width * POINT_CLUSTER_GRID_SIZE)))
+        cell_y = min(POINT_CLUSTER_GRID_SIZE - 1, max(0, int((coordinates[1] - south) / height * POINT_CLUSTER_GRID_SIZE)))
+        groups.setdefault((str(properties.get('layer_id', '')), cell_x, cell_y), []).append(feature)
+    clustered: list[dict] = []
+    for (layer_id, cell_x, cell_y), items in groups.items():
+        if len(items) == 1:
+            clustered.extend(items)
+            continue
+        coordinates = [item['geometry']['coordinates'] for item in items]
+        longitudes = [point[0] for point in coordinates]
+        latitudes = [point[1] for point in coordinates]
+        clustered.append({
+            'type': 'Feature',
+            'id': f'cluster:{layer_id}:{cell_x}:{cell_y}',
+            'geometry': {'type': 'Point', 'coordinates': [sum(longitudes) / len(longitudes), sum(latitudes) / len(latitudes)]},
+            'properties': {
+                'id': f'cluster:{layer_id}:{cell_x}:{cell_y}', 'layer_id': layer_id, 'kind': 'cluster', 'cluster': True,
+                'count': len(items), 'bbox': [min(longitudes), min(latitudes), max(longitudes), max(latitudes)],
+            },
+        })
+    return other + clustered
 
 
 @router.get('/basemap')
@@ -38,18 +77,19 @@ async def bounds(map_id: UUID, request: Request, _: tuple[str, SessionData] = De
 
 
 @router.get('/maps/{map_id}/features')
-async def features(map_id: UUID, request: Request, bbox: str = Query(pattern=r'^-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?$'), layers: str | None = Query(default=None, max_length=2048), _: tuple[str, SessionData] = Depends(require_gis_data_session)):
+async def features(map_id: UUID, request: Request, bbox: str = Query(pattern=r'^-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?$'), layers: str | None = Query(default=None, max_length=2048), zoom: int = Query(default=15, ge=1, le=23), _: tuple[str, SessionData] = Depends(require_gis_data_session), settings: Settings = Depends(get_settings)):
     result = await request.app.state.gis_client.features(str(map_id), bbox=bbox, layers=layers)
     features = result.get('features')
     if isinstance(features, list):
+        visible_features = [
+            feature for feature in features
+            if isinstance(feature, dict)
+            and isinstance(feature.get('geometry'), dict)
+            and feature['geometry'].get('type') in DRAWABLE_GEOMETRIES
+        ]
         result = {
             **result,
-            'features': [
-                feature for feature in features
-                if isinstance(feature, dict)
-                and isinstance(feature.get('geometry'), dict)
-                and feature['geometry'].get('type') in DRAWABLE_GEOMETRIES
-            ],
+            'features': visible_features if zoom >= settings.gis_point_detail_zoom else cluster_points(visible_features, bbox),
         }
     return result
 
