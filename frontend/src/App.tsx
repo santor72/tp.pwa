@@ -752,7 +752,7 @@ function GisFeaturePicker({ value, onChange }: { value: string; onChange: (value
   const selectedTitle = chosenFeature ? chosenFeature.properties.title || (chosenFeature.properties.number !== undefined ? `Объект №${chosenFeature.properties.number}` : 'Объект сети') : ''
   const selectedLayer = details?.layer_name || layers.find(layer => layer.id === selected?.properties.layer_id)?.name || 'Объект сети'
   return <>
-    <button type="button" className="outline-button gis-picker-button" onClick={() => setOpen(true)}>{value ? `Объект: ${selectedTitle || value}` : 'Выбрать объект на карте'}</button>
+    <button type="button" className="outline-button gis-picker-button" onClick={event => { event.preventDefault(); setOpen(true) }}>{value ? `Объект: ${selectedTitle || value}` : 'Выбрать объект на карте'}</button>
     {value && <button type="button" className="gis-clear-feature" onClick={() => onChange('')}>Не отправлять в GIS</button>}
     {open && <div className="gis-feature-backdrop" onClick={closePicker}>
       <aside className="gis-feature-card gis-picker" role="dialog" aria-modal="true" aria-label="Выбрать объект GIS" onClick={event => event.stopPropagation()}>

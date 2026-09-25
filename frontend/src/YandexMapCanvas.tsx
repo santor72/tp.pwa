@@ -177,7 +177,10 @@ export const YandexMapCanvas: GisMapCanvas = ({ data, position, view, onViewChan
     const coordinates = (renderedData?.features ?? []).flatMap(feature => feature.geometry.type === 'Point' ? [feature.geometry.coordinates as [number, number]] : feature.geometry.type === 'LineString' ? feature.geometry.coordinates as [number, number][] : (feature.geometry.coordinates as [number, number][][]).flat())
     if (coordinates.length) onViewChange(initialMapView(coordinates))
   }
-  return <div ref={root} className="gis-map-canvas" role="application" aria-label="Карта сети">
+  return <div ref={root} className="gis-map-canvas" role="application" aria-label="Карта сети" onClickCapture={event => {
+    const button = event.target instanceof Element ? event.target.closest('button') : null
+    if (button && !button.hasAttribute('type')) event.preventDefault()
+  }}>
     <div ref={node} className="gis-yandex-map" />
     {loading && <p className="gis-map-status">Загрузка карты…</p>}
     {error && <div className="gis-map-error"><p>{error}</p><button type="button" className="outline-button" onClick={retry}>Повторить загрузку</button></div>}
