@@ -47,7 +47,6 @@ export const YandexMapCanvas: GisMapCanvas = ({ data, position, view, onViewChan
   const [attempt, setAttempt] = useState(0); const [mapVersion, setMapVersion] = useState(0)
   const root = useRef<HTMLDivElement>(null)
   const selectRef = useRef(onSelect); const onViewChangeRef = useRef(onViewChange); const initialMapViewRef = useRef(initialMapView)
-  const reportMap = useRef<(() => void) | null>(null)
   const pointFeatures = useRef(new Map<string, GisFeature>()); const pointVersions = useRef(new Map<string, string>()); const lineVersions = useRef(new Map<string, string>())
   const interacting = useRef(false); const pendingData = useRef<GisMapCanvasProps['data'] | undefined>(undefined); const [renderedData, setRenderedData] = useState(data)
   viewRef.current = view; selectRef.current = onSelect; onViewChangeRef.current = onViewChange; initialMapViewRef.current = initialMapView
@@ -90,7 +89,6 @@ export const YandexMapCanvas: GisMapCanvas = ({ data, position, view, onViewChan
         onViewChange({ longitude: center[1], latitude: center[0], zoom: map.current.getZoom() })
         onBoundsChange([bounds[0][1], bounds[0][0], bounds[1][1], bounds[1][0]])
       }
-      reportMap.current = report
       const actionBegin = () => { interacting.current = true; pendingData.current = undefined; onInteractionChange(true) }
       const actionEnd = () => {
         interacting.current = false
@@ -98,11 +96,13 @@ export const YandexMapCanvas: GisMapCanvas = ({ data, position, view, onViewChan
         onInteractionChange(false)
         report()
       }
+      const boundsChange = () => { if (!interacting.current) report() }
       map.current.events.add('actionbegin', actionBegin)
       map.current.events.add('actionend', actionEnd)
+      map.current.events.add('boundschange', boundsChange)
       report(); setLoading(false)
     }).catch(cause => { if (live) { setError(cause instanceof Error ? cause.message : 'Не удалось загрузить карту'); setLoading(false) } })
-    return () => { live = false; reportMap.current = null; onInteractionChange(false); if (map.current) { map.current.destroy(); map.current = null; pointObjects.current = null; lineObjects.current = null; positionObject.current = null; pointFeatures.current.clear(); pointVersions.current.clear(); lineVersions.current.clear() } }
+    return () => { live = false; onInteractionChange(false); if (map.current) { map.current.destroy(); map.current = null; pointObjects.current = null; lineObjects.current = null; positionObject.current = null; pointFeatures.current.clear(); pointVersions.current.clear(); lineVersions.current.clear() } }
     // Component lifecycle owns the Yandex map. Changes below update this instance.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attempt])
@@ -113,7 +113,6 @@ export const YandexMapCanvas: GisMapCanvas = ({ data, position, view, onViewChan
     const center = instance.getCenter()
     if (Math.abs(center[0] - view.latitude) > .000001 || Math.abs(center[1] - view.longitude) > .000001 || instance.getZoom() !== view.zoom) {
       instance.setCenter([view.latitude, view.longitude], view.zoom, { duration: 0 })
-      reportMap.current?.()
     }
   }, [view.latitude, view.longitude, view.zoom])
 
@@ -182,7 +181,7 @@ export const YandexMapCanvas: GisMapCanvas = ({ data, position, view, onViewChan
     const coordinates = (renderedData?.features ?? []).flatMap(feature => feature.geometry.type === 'Point' ? [feature.geometry.coordinates as [number, number]] : feature.geometry.type === 'LineString' ? feature.geometry.coordinates as [number, number][] : (feature.geometry.coordinates as [number, number][][]).flat())
     if (coordinates.length) onViewChange(initialMapView(coordinates))
   }
-  return <div ref={root} className="gis-map-canvas" role="application" aria-label="Карта сети" onClickCapture={event => {
+  return <div ref={root} className="gis-map-canvas" role="application" aria-label="Карта сети" onInvalidCapture={event => event.preventDefault()} onClickCapture={event => {
     const button = event.target instanceof Element ? event.target.closest('button') : null
     if (button && !button.hasAttribute('type')) event.preventDefault()
   }}>
