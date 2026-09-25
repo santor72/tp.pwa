@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { api } from '../src/api'
+import { api, gisRequestZoom } from '../src/api'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -29,5 +29,13 @@ describe('Ошибки загрузки фотоотчёта', () => {
     })))
 
     await expect(complete()).rejects.toMatchObject({ status: 413, ...error })
+  })
+})
+
+describe('масштаб запросов объектов GIS', () => {
+  it('преобразует плавный масштаб в допустимое целое значение', () => {
+    expect(gisRequestZoom(14.9)).toBe(14)
+    expect(gisRequestZoom(0.5)).toBe(1)
+    expect(gisRequestZoom(27)).toBe(23)
   })
 })

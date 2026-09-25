@@ -61,6 +61,7 @@ afterEach(() => {
 
 beforeEach(() => {
   let container: HTMLElement | null = null
+  let v3Container: HTMLElement | null = null
   const object = () => {
     const handlers: Record<string, () => void> = {}
     return { events: { add: (name: string, handler: () => void) => { handlers[name] = handler } }, _handlers: handlers }
@@ -93,6 +94,27 @@ beforeEach(() => {
   }
   function GeoObject() { return object() }
   vi.stubGlobal('ymaps', { ready: (callback: () => void) => callback(), Map, ObjectManager, GeoObjectCollection: Collection, Circle: GeoObject, Placemark: GeoObject, Polygon: GeoObject, Polyline: GeoObject })
+  class V3Listener { constructor(public handlers: Record<string, (...args: any[]) => void>) {} }
+  class V3Marker { constructor(public props: Record<string, unknown>, public element: HTMLElement) {} }
+  class V3Feature { constructor(public props: Record<string, unknown>) {} }
+  class V3Layer { constructor(public props: Record<string, unknown> = {}) {} }
+  class V3Map {
+    center: [number, number]; zoom: number; bounds: [[number, number], [number, number]] = [[37.1, 55], [37.3, 55.2]]
+    private listener: V3Listener | undefined
+    constructor(element: HTMLElement, props: { location: { center: [number, number]; zoom: number }; mode: string }, children: unknown[]) {
+      v3Container = element; this.center = props.location.center; this.zoom = props.location.zoom
+      element.dataset.mapMode = props.mode; this.listener = children.find(child => child instanceof V3Listener) as V3Listener | undefined
+    }
+    addChild(entity: unknown) { if (entity instanceof V3Marker) v3Container?.append(entity.element); return this }
+    removeChild(entity: unknown) { if (entity instanceof V3Marker) entity.element.remove(); return this }
+    update(props: { location?: { center?: [number, number]; zoom?: number } }) {
+      if (props.location?.center) this.center = props.location.center
+      if (props.location?.zoom !== undefined) this.zoom = props.location.zoom
+      this.listener?.handlers.onUpdate?.({ location: { center: this.center, zoom: this.zoom }, mapInAction: false })
+    }
+    destroy() { v3Container?.replaceChildren() }
+  }
+  vi.stubGlobal('ymaps3', { ready: Promise.resolve(), YMap: V3Map, YMapListener: V3Listener, YMapMarker: V3Marker, YMapFeature: V3Feature, YMapDefaultSchemeLayer: V3Layer, YMapDefaultFeaturesLayer: V3Layer })
 })
 
 describe('Платёжный терминал', () => {
@@ -360,7 +382,7 @@ describe('Карта сети', () => {
       if (path === '/api/tickets/today') return json([])
       if (path === '/api/gis/basemap') return json({ provider: 'yandex', scriptUrl: 'https://api-maps.yandex.ru/2.1/?apikey=test&lang=ru_RU&csp=true' })
       if (path === '/api/gis/maps') return json({ rows: [{ id: mapId, name: 'Чехов', created_at: '2026-09-16T09:00:00Z', report: { total: 1 } }] })
-      if (path === `/api/gis/maps/${mapId}/layers`) return json({ rows: [{ id: layerId, name: 'Муфты', position: 1, count: 1, version: 1 }] })
+      if (path === `/api/gis/maps/${mapId}/layers`) return json({ rows: [{ id: layerId, name: 'Муфты', position: 1, count: 2600, version: 1 }] })
       if (path === `/api/gis/maps/${mapId}/bounds`) return json({ xmin: 37.1, ymin: 55, xmax: 37.3, ymax: 55.2 })
       if (path.startsWith(`/api/gis/maps/${mapId}/features?bbox=`)) return json({ type: 'FeatureCollection', truncated: false, limit: 40000, features: [{ type: 'Feature', id: featureId, geometry: { type: 'Point', coordinates: [37.2, 55.1] }, properties: { id: featureId, layer_id: layerId, kind: 'Point', title: 'Муфта 1', iconColor: '#0288d1' } }] })
       if (path === `/api/gis/features/${featureId}`) return json({ id: featureId, layer_id: layerId, map_id: mapId, layer_name: 'Муфты', title: 'Муфта 1', number: 42, kind: 'Point', description: 'Адрес: Чехов<br>Кол-во подъездов: 2', geometry: { type: 'Point', coordinates: [37.2, 55.1] }, style: {}, version: 3 })
@@ -371,6 +393,10 @@ describe('Карта сети', () => {
     await screen.findByRole('heading', { name: 'Заявки сегодня' })
     fireEvent.click(screen.getByRole('button', { name: 'Карта' }))
     expect(await screen.findByRole('heading', { name: 'Карта сети' })).toBeTruthy()
+    const layerCheckbox = await screen.findByRole('checkbox', { name: 'Муфты' })
+    fireEvent.click(layerCheckbox)
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить как по умолчанию' }))
+    expect(localStorage.getItem(`tp-pwa.gis.default-layers:${mapId}`)).toBe('[]')
     expect(await screen.findByRole('application', { name: 'Карта сети' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Увеличить масштаб' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Уменьшить масштаб' })).toBeTruthy()
@@ -400,7 +426,7 @@ describe('Карта сети', () => {
       if (path === '/api/tickets/today') return json([])
       if (path === '/api/gis/basemap') return json({ provider: 'yandex', scriptUrl: 'https://api-maps.yandex.ru/2.1/?apikey=test&lang=ru_RU&csp=true' })
       if (path === '/api/gis/maps') return json({ rows: [{ id: mapId, name: 'Чехов', created_at: '2026-09-16T09:00:00Z', report: { total: 1 } }] })
-      if (path === `/api/gis/maps/${mapId}/layers`) return json({ rows: [{ id: layerId, name: 'Муфты', position: 1, count: 1, version: 1 }] })
+      if (path === `/api/gis/maps/${mapId}/layers`) return json({ rows: [{ id: layerId, name: 'Муфты', position: 1, count: 2600, version: 1 }] })
       if (path === `/api/gis/maps/${mapId}/bounds`) return json({ xmin: 37.1, ymin: 55, xmax: 37.3, ymax: 55.2 })
       if (path.startsWith(`/api/gis/maps/${mapId}/features?bbox=`)) return json({ type: 'FeatureCollection', truncated: false, limit: 40000, features: [{ type: 'Feature', id: featureId, geometry: { type: 'Point', coordinates: [37.2, 55.1] }, properties: { id: featureId, layer_id: layerId, kind: 'Point', title: 'Муфта 1', iconColor: '#0288d1' } }] })
       if (path === `/api/gis/features/${featureId}`) return json({ id: featureId, layer_id: layerId, map_id: mapId, layer_name: 'Муфты', title: 'Муфта 1', number: 42, kind: 'Point', description: '', geometry: { type: 'Point', coordinates: [37.2, 55.1] }, style: {}, version: 3 })
@@ -748,9 +774,9 @@ describe('Заявки', () => {
       const path = String(input)
       if (path === '/api/auth/session') return json(session)
       if (path === '/api/tickets/today') return json([ticket])
-      if (path === '/api/gis/basemap') return json({ provider: 'yandex', scriptUrl: 'https://api-maps.yandex.ru/2.1/?apikey=test&lang=ru_RU&csp=true' })
+      if (path === '/api/gis/basemap') return json({ provider: 'yandex-v3', scriptUrl: 'https://api-maps.yandex.ru/v3/?apikey=test&lang=ru_RU' })
       if (path === '/api/gis/maps') return json({ rows: [{ id: mapId, name: 'Чехов', created_at: '2026-09-16T09:00:00Z', report: { total: 1 } }] })
-      if (path === `/api/gis/maps/${mapId}/layers`) return json({ rows: [{ id: layerId, name: 'Муфты', position: 1, count: 1, version: 1 }] })
+      if (path === `/api/gis/maps/${mapId}/layers`) return json({ rows: [{ id: layerId, name: 'Муфты', position: 1, count: 2600, version: 1 }] })
       if (path === `/api/gis/maps/${mapId}/bounds`) return json({ xmin: 37.1, ymin: 55, xmax: 37.3, ymax: 55.2 })
       if (path.startsWith(`/api/gis/maps/${mapId}/features?bbox=`)) return json({ type: 'FeatureCollection', truncated: false, limit: 40000, features: [{ type: 'Feature', id: featureId, geometry: { type: 'Point', coordinates: [37.2, 55.1] }, properties: { id: featureId, layer_id: layerId, kind: 'Point', title: 'Муфта 1', iconColor: '#0288d1' } }] })
       if (path === `/api/gis/features/${featureId}`) return json({ id: featureId, layer_id: layerId, map_id: mapId, layer_name: 'Муфты', title: 'Муфта 1', number: 42, kind: 'Point', description: '', geometry: { type: 'Point', coordinates: [37.2, 55.1] }, style: {}, version: 3 })
@@ -761,8 +787,10 @@ describe('Заявки', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Выбрать объект на карте' }))
     const map = await screen.findByRole('application', { name: 'Карта сети' })
     expect(screen.queryByText(/^Слои/)).toBeNull()
-    await waitFor(() => expect(map.querySelector('.ymaps-feature')).not.toBeNull())
-    fireEvent.click(map.querySelector('.ymaps-feature')!)
+    await waitFor(() => expect(map.querySelector('.gis-v3-marker')).not.toBeNull())
+    expect(map.querySelector('.gis-yandex-map')?.getAttribute('data-map-mode')).toBe('vector')
+    expect(screen.queryByRole('combobox', { name: 'Подложка карты' })).toBeNull()
+    fireEvent.click(map.querySelector('.gis-v3-marker')!)
     expect(await screen.findByRole('button', { name: 'Выбрать этот объект' })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Выбрать этот объект' }))
     expect(await screen.findByLabelText('Отчёт для GIS')).toBeTruthy()

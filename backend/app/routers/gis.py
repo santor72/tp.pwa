@@ -18,8 +18,10 @@ DRAWABLE_GEOMETRIES = {'Point', 'LineString'}
 async def basemap(_: tuple[str, SessionData] = Depends(require_gis_data_session), settings: Settings = Depends(get_settings)):
     """Return active map-provider configuration only to GIS-enabled sessions."""
     key = settings.yandex_maps_api_key.get_secret_value().strip()
-    script_url = f'https://api-maps.yandex.ru/2.1/?apikey={key}&lang=ru_RU&csp=true' if key else None
-    return JSONResponse({'provider': settings.gis_map_provider, 'scriptUrl': script_url}, headers={'Cache-Control': 'no-store'})
+    version = 'v3' if settings.gis_map_provider == 'yandex-v3' else '2.1'
+    suffix = '' if version == 'v3' else '&csp=true'
+    script_url = f'https://api-maps.yandex.ru/{version}/?apikey={key}&lang=ru_RU{suffix}' if key else None
+    return JSONResponse({'provider': settings.gis_map_provider, 'scriptUrl': script_url, 'pointIconSize': settings.gis_point_icon_size, 'pointCircleSize': settings.gis_point_circle_size, 'pointFixedSizeMaxZoom': settings.gis_point_fixed_size_max_zoom}, headers={'Cache-Control': 'no-store'})
 
 
 @router.get('/maps')
@@ -48,13 +50,23 @@ async def features(map_id: UUID, request: Request, bbox: str = Query(pattern=r'^
             and isinstance(feature.get('geometry'), dict)
             and feature['geometry'].get('type') in DRAWABLE_GEOMETRIES
         ]
+        point_count = 0
+        limited_features = []
+        points_limited = settings.gis_max_point_count > 0 and zoom <= settings.gis_point_fixed_size_max_zoom
+        for feature in visible_features:
+            if feature['geometry']['type'] == 'Point':
+                point_count += 1
+                if points_limited and point_count > settings.gis_max_point_count:
+                    continue
+            limited_features.append(feature)
         result = {
             **result,
             'features': [
                 {**feature, 'properties': {**(feature.get('properties') if isinstance(feature.get('properties'), dict) else {}), 'interactive': zoom >= settings.gis_point_detail_zoom}}
                 if feature['geometry']['type'] == 'Point' else feature
-                for feature in visible_features
+                for feature in limited_features
             ],
+            'truncated': bool(result.get('truncated')) or points_limited and point_count > settings.gis_max_point_count,
         }
     return result
 

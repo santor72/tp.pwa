@@ -34,6 +34,7 @@ def test_payment_amount_limits_are_decimal() -> None:
 
 def test_gis_map_provider_is_explicit_and_limited_to_registered_implementations() -> None:
     assert Settings(_env_file=None).gis_map_provider == 'yandex'
+    assert Settings(_env_file=None, gis_map_provider='yandex-v3').gis_map_provider == 'yandex-v3'
     with pytest.raises(ValidationError):
         Settings(_env_file=None, gis_map_provider='2gis')
 

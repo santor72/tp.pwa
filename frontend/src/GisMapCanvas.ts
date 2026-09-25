@@ -1,6 +1,6 @@
 import type { ComponentType } from 'react'
 
-import type { GisFeature, GisFeatureCollection } from './api'
+import type { GisBasemapConfig, GisFeature, GisFeatureCollection } from './api'
 
 /** Provider-neutral input for a GIS map engine. Coordinates use GeoJSON order. */
 export type GisMapView = { longitude: number; latitude: number; zoom: number }
@@ -22,3 +22,5 @@ export type GisMapCanvasProps = {
 
 /** A map-engine implementation that can be selected by the application. */
 export type GisMapCanvas = ComponentType<GisMapCanvasProps>
+export type ConfiguredGisMapCanvasProps = GisMapCanvasProps & { config: GisBasemapConfig }
+export type ConfiguredGisMapCanvas = ComponentType<ConfiguredGisMapCanvasProps>

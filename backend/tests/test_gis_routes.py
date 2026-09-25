@@ -124,6 +124,25 @@ def test_features_marks_points_noninteractive_below_detail_zoom():
     assert [feature['properties']['interactive'] for feature in features if feature['geometry']['type'] == 'Point'] == [False, False]
 
 
+def test_features_limits_points_at_low_zoom_when_configured():
+    app = FastAPI()
+    gis = CapturingGisClient()
+    app.state.gis_client = gis
+    app.include_router(router)
+
+    async def session_override():
+        return 'session', None
+
+    app.dependency_overrides[require_gis_data_session] = session_override
+    app.dependency_overrides[get_settings] = lambda: Settings(gis_max_point_count=1)
+    response = TestClient(app).get(f'/api/gis/maps/{uuid4()}/features', params={
+        'bbox': '37.1,55.0,37.4,55.3', 'layers': 'layer-1', 'zoom': 15,
+    })
+
+    assert [feature['id'] for feature in response.json()['features']] == ['point', 'line']
+    assert response.json()['truncated'] is True
+
+
 def test_basemap_returns_official_sdk_url_only_when_key_is_configured():
     app = FastAPI()
     app.include_router(router)
@@ -137,7 +156,16 @@ def test_basemap_returns_official_sdk_url_only_when_key_is_configured():
 
     assert response.status_code == 200
     assert response.headers['cache-control'] == 'no-store'
-    assert response.json() == {'provider': 'yandex', 'scriptUrl': 'https://api-maps.yandex.ru/2.1/?apikey=test-key&lang=ru_RU&csp=true'}
+    assert response.json() == {'provider': 'yandex', 'scriptUrl': 'https://api-maps.yandex.ru/2.1/?apikey=test-key&lang=ru_RU&csp=true', 'pointIconSize': 32, 'pointCircleSize': 22, 'pointFixedSizeMaxZoom': 15}
 
     app.dependency_overrides[get_settings] = lambda: Settings()
-    assert TestClient(app).get('/api/gis/basemap').json() == {'provider': 'yandex', 'scriptUrl': None}
+    assert TestClient(app).get('/api/gis/basemap').json() == {'provider': 'yandex', 'scriptUrl': None, 'pointIconSize': 32, 'pointCircleSize': 22, 'pointFixedSizeMaxZoom': 15}
+
+    app.dependency_overrides[get_settings] = lambda: Settings(gis_map_provider='yandex-v3', yandex_maps_api_key='v3-key')
+    assert TestClient(app).get('/api/gis/basemap').json() == {
+        'provider': 'yandex-v3',
+        'scriptUrl': 'https://api-maps.yandex.ru/v3/?apikey=v3-key&lang=ru_RU',
+        'pointIconSize': 32,
+        'pointCircleSize': 22,
+        'pointFixedSizeMaxZoom': 15,
+    }

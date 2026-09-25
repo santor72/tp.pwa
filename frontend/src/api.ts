@@ -83,6 +83,8 @@ export type MessengerLinkCreate = {
   expires_at: string
 }
 export type GisMap = { id: string; name: string; created_at: string; report: { total: number } }
+export type GisMapProvider = 'yandex' | 'yandex-v3'
+export type GisBasemapConfig = { provider: GisMapProvider; scriptUrl: string | null; pointIconSize?: number; pointCircleSize?: number; pointFixedSizeMaxZoom?: number }
 export type GisLayer = { id: string; name: string; position: number; count: number; version: number }
 export type GisFeatureStyle = {
   iconColor?: string; iconId?: string | null; iconScale?: number; markerShape?: 'pin' | 'circle'; recolorIcon?: boolean
@@ -121,6 +123,11 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new ApiError(response.status, data.code ?? 'REQUEST_FAILED', data.message ?? 'Ошибка запроса')
   }
   return data as T
+}
+
+/** The GIS endpoint uses integer zoom thresholds while vector maps expose fractional zoom. */
+export function gisRequestZoom(zoom: number): number {
+  return Math.max(1, Math.min(23, Math.floor(Number.isFinite(zoom) ? zoom : 15)))
 }
 
 export const api = {
@@ -183,10 +190,10 @@ export const api = {
     method: 'DELETE', headers: { 'X-CSRF-Token': csrfToken },
   }),
   gisMaps: () => request<{ rows: GisMap[] }>('/api/gis/maps'),
-  gisBasemap: () => request<{ provider: 'yandex'; scriptUrl: string | null }>('/api/gis/basemap'),
+  gisBasemap: () => request<GisBasemapConfig>('/api/gis/basemap'),
   gisLayers: (mapId: string) => request<{ rows: GisLayer[] }>(`/api/gis/maps/${mapId}/layers`),
   gisBounds: (mapId: string) => request<{ xmin: number; ymin: number; xmax: number; ymax: number }>(`/api/gis/maps/${mapId}/bounds`),
-  gisFeatures: (mapId: string, bbox: [number, number, number, number], layers: string[], zoom: number, signal?: AbortSignal) => request<GisFeatureCollection>(`/api/gis/maps/${mapId}/features?bbox=${bbox.join(',')}&zoom=${zoom}${layers.length ? `&layers=${encodeURIComponent(layers.join(','))}` : ''}`, { signal }),
+  gisFeatures: (mapId: string, bbox: [number, number, number, number], layers: string[], zoom: number, signal?: AbortSignal) => request<GisFeatureCollection>(`/api/gis/maps/${mapId}/features?bbox=${bbox.join(',')}&zoom=${gisRequestZoom(zoom)}${layers.length ? `&layers=${encodeURIComponent(layers.join(','))}` : ''}`, { signal }),
   gisFeature: (featureId: string) => request<GisFeatureDetails>(`/api/gis/features/${featureId}`),
   createGisReport: (report: GisMapReport, csrfToken: string) => {
     const body = new FormData()
