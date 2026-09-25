@@ -777,7 +777,6 @@ function GisFeaturePicker({ value, onChange }: { value: string; onChange: (value
         {!selected && <>
           {locationNotice && <p className="gis-map-notice">{locationNotice}</p>}
           {mapView && <MapCanvas data={data} position={position} view={mapView} onViewChange={handleViewChange} onBoundsChange={updateViewportBounds} onInteractionChange={setMapInteracting} onSelect={openFeature} onLocate={locate} locating={locating} />}
-          {data?.truncated && <div className="error-box">Показана не вся сеть. Уточните область на карте.</div>}
         </>}
         {selected && <section className="gis-picker-selection" aria-label="Подтверждение объекта GIS">
           <header><div><small>{selectedLayer}</small><h3>{details?.title || selectedTitle}</h3></div><button type="button" onClick={() => setSelected(null)} aria-label="Вернуться к карте">×</button></header>
@@ -1400,14 +1399,12 @@ function MapScreen({ session }: { session: Session }) {
   }, [])
   const closeFeature = () => { setSelected(null); setSelectedDetails(null); setDetailsError('') }
   return <section className="map-screen">
-    <div className="step-heading"><h1>Карта сети</h1><p>{locationNotice || 'Определяем местоположение…'}</p></div>
+    <div className="step-heading"><div className="gis-map-heading-row"><h1>Карта сети</h1>{layers.length > 0 && <details className="gis-layers-panel"><summary>Слои <span>{selectedLayers.length} из {layers.length}</span></summary><div className="gis-layers">{layers.map(layer => <label key={layer.id}><input type="checkbox" checked={selectedLayers.includes(layer.id)} onChange={() => toggleLayer(layer.id)} />{layer.name}</label>)}</div><div className="gis-layer-defaults"><span>{defaultsSaved ? 'Настройка по умолчанию сохранена' : 'Используется исходный набор слоёв'}</span><button type="button" className="outline-button" onClick={saveDefaultLayers}>Сохранить как по умолчанию</button>{defaultsSaved && <button type="button" className="outline-button" onClick={resetDefaultLayers}>Сбросить</button>}</div></details>}</div><p>{locationNotice || 'Определяем местоположение…'}</p></div>
     {error && <ErrorBox text={error} />}
     {loading && <div className="panel empty-state">Загрузка карты…</div>}
     {!loading && maps.length === 0 && <div className="panel empty-state">Нет доступных карт</div>}
     {maps.length > 1 && <label className="field"><span>Карта</span><select value={current?.id ?? ''} onChange={event => setCurrent(maps.find(map => map.id === event.target.value) ?? null)}>{maps.map(map => <option key={map.id} value={map.id}>{map.name}</option>)}</select></label>}
-    {layers.length > 0 && <details className="gis-layers-panel"><summary>Слои <span>{selectedLayers.length} из {layers.length}</span></summary><div className="gis-layers">{layers.map(layer => <label key={layer.id}><input type="checkbox" checked={selectedLayers.includes(layer.id)} onChange={() => toggleLayer(layer.id)} />{layer.name}</label>)}</div><div className="gis-layer-defaults"><span>{defaultsSaved ? 'Настройка по умолчанию сохранена' : 'Используется исходный набор слоёв'}</span><button type="button" className="outline-button" onClick={saveDefaultLayers}>Сохранить как по умолчанию</button>{defaultsSaved && <button type="button" className="outline-button" onClick={resetDefaultLayers}>Сбросить</button>}</div></details>}
     {mapView && <MapCanvas data={data} position={position} view={mapView} onViewChange={handleViewChange} onBoundsChange={updateViewportBounds} onInteractionChange={setMapInteracting} onSelect={openFeature} onLocate={locate} locating={locating} />}
-    {data?.truncated && <div className="error-box">Показана не вся сеть. Уточните область на карте.</div>}
     <GisFeatureCard key={selected?.id} feature={selected} details={selectedDetails} loading={detailsLoading} error={detailsError} csrfToken={session.csrf_token} onClose={closeFeature} />
   </section>
 }

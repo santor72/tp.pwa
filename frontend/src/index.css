@@ -213,6 +213,8 @@ input:focus, textarea:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px #dbea
 .tickets-screen, .ticket-details { display: grid; gap: 1rem; }
 .map-screen { display: grid; gap: 1rem; }
 .map-screen select { width: 100%; border: 1px solid #cbd5e1; border-radius: .8rem; padding: .78rem .9rem; background: white; }
+.gis-map-heading-row { display: flex; flex-wrap: wrap; align-items: center; gap: .65rem; }
+.gis-map-heading-row .gis-layers-panel { margin-left: auto; }
 .gis-layers-panel { border: 1px solid #dbe2ea; border-radius: .8rem; background: #f8fafc; }
 .gis-layers-panel summary { cursor: pointer; padding: .65rem .8rem; color: #334155; font-size: .84rem; font-weight: 650; list-style-position: inside; }
 .gis-layers-panel summary span { float: right; color: #64748b; font-weight: 500; }

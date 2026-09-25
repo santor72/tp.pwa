@@ -84,6 +84,7 @@ export const YandexMapCanvas: ConfiguredGisMapCanvas = ({ config, data, position
 
   useEffect(() => {
     let live = true
+    let renderFrame: number | null = null
     setLoading(true); setError('')
     if (!config.scriptUrl) {
       setError('Карта недоступна: не настроен ключ API Яндекс Карт'); setLoading(false)
@@ -115,8 +116,8 @@ export const YandexMapCanvas: ConfiguredGisMapCanvas = ({ config, data, position
       const actionEnd = () => {
         interacting.current = false
         if (pendingData.current !== undefined) { setRenderedData(pendingData.current); pendingData.current = undefined }
-        onInteractionChange(false); setMapVersion(value => value + 1)
-        report()
+        onInteractionChange(false); report()
+        renderFrame = window.requestAnimationFrame(() => { renderFrame = null; if (!interacting.current) setMapVersion(value => value + 1) })
       }
       const boundsChange = () => { if (!interacting.current) report() }
       map.current.events.add('actionbegin', actionBegin)
@@ -124,7 +125,7 @@ export const YandexMapCanvas: ConfiguredGisMapCanvas = ({ config, data, position
       map.current.events.add('boundschange', boundsChange)
       report(); setLoading(false)
     }).catch(cause => { if (live) { setError(cause instanceof Error ? cause.message : 'Не удалось загрузить карту'); setLoading(false) } })
-    return () => { live = false; renderController.current?.abort(); onInteractionChange(false); if (map.current) { map.current.destroy(); map.current = null; pointObjects.current = null; lineObjects.current = null; positionObject.current = null; pointFeatures.current.clear(); pointVersions.current.clear(); lineVersions.current.clear() } }
+    return () => { live = false; if (renderFrame !== null) window.cancelAnimationFrame(renderFrame); renderController.current?.abort(); onInteractionChange(false); if (map.current) { map.current.destroy(); map.current = null; pointObjects.current = null; lineObjects.current = null; positionObject.current = null; pointFeatures.current.clear(); pointVersions.current.clear(); lineVersions.current.clear() } }
     // Component lifecycle owns the Yandex map. Changes below update this instance.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attempt, config.scriptUrl])

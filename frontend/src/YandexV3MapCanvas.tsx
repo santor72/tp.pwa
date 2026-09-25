@@ -78,6 +78,7 @@ export const YandexV3MapCanvas: ConfiguredGisMapCanvas = ({ config, data, positi
 
   useEffect(() => {
     let live = true
+    let renderFrame: number | null = null
     setLoading(true); setError('')
     if (!config.scriptUrl) { setError('Карта недоступна: не настроен ключ API Яндекс Карт'); setLoading(false); return () => { live = false } }
     loadSdk(config.scriptUrl).then(api => {
@@ -95,7 +96,8 @@ export const YandexV3MapCanvas: ConfiguredGisMapCanvas = ({ config, data, positi
         onActionEnd: () => {
           interacting.current = false
           if (pendingData.current !== undefined) { setRenderedData(pendingData.current); pendingData.current = undefined }
-          onInteractionChange(false); setMapVersion(value => value + 1); report()
+          onInteractionChange(false); report()
+          renderFrame = window.requestAnimationFrame(() => { renderFrame = null; if (!interacting.current) setMapVersion(value => value + 1) })
         },
       })
       map.current = new api.YMap(node.current, {
@@ -105,7 +107,7 @@ export const YandexV3MapCanvas: ConfiguredGisMapCanvas = ({ config, data, positi
       setMapVersion(value => value + 1); setLoading(false); window.setTimeout(report, 0)
     }).catch(cause => { if (live) { setError(cause instanceof Error ? cause.message : 'Не удалось загрузить карту'); setLoading(false) } })
     return () => {
-      live = false; renderController.current?.abort(); onInteractionChange(false)
+      live = false; if (renderFrame !== null) window.cancelAnimationFrame(renderFrame); renderController.current?.abort(); onInteractionChange(false)
       if (map.current) map.current.destroy()
       map.current = null; sdk.current = null; points.current.clear(); lines.current.clear(); positionMarker.current = null
     }
