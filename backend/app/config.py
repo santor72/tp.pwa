@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     tp_api_timeout_seconds: float = Field(default=20.0, gt=0)
     tp_tickets_max_pages: int = Field(default=100, gt=0)
     tp_users_cache_ttl_seconds: int = Field(default=300, gt=0)
+    map_source: Literal['gis', 'mobilemap'] = 'gis'
+    mobilemap_base_url: str = ''
+    mobilemap_username: str = ''
+    mobilemap_password: SecretStr = SecretStr('')
+    mobilemap_timeout_seconds: float = Field(default=20.0, gt=0, le=120)
     gis_base_url: str = ''
     gis_api_token: SecretStr = SecretStr('')
     yandex_maps_api_key: SecretStr = SecretStr('')

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { api, gisRequestZoom } from '../src/api'
+import { api } from '../src/api'
+import { gisRequestZoom } from '../src/GisDataProvider'
 
 afterEach(() => vi.unstubAllGlobals())
 

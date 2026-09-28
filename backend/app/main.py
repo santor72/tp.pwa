@@ -33,6 +33,8 @@ from app.routers.messengers import router as messengers_router
 from app.routers.payments import router as payments_router
 from app.routers.payment_timings import router as payment_timings_router
 from app.routers.gis import router as gis_router
+from app.routers.mobilemap import router as mobilemap_router
+from app.mobilemap_client import MobileMapClient
 from app.routers.completions import router as completions_router
 from app.payment_telemetry import Trace, current_trace, span
 from app.payment_runtime_registry import PaymentRuntimeRegistry
@@ -61,6 +63,7 @@ async def lifespan(app: FastAPI):
     app.state.ticket_service = app.state.services.ticket_service
     app.state.messenger_links = app.state.services.messenger_links
     app.state.gis_client = app.state.services.gis_client
+    app.state.mobilemap_client = MobileMapClient(settings)
     app.state.connection_completion_service = app.state.services.connection_completion_service
     registry = PaymentRuntimeRegistry(app.state.services.sessions, settings.payment_processing_mode)
     app.state.payment_runtime_registry = registry
@@ -77,6 +80,7 @@ async def lifespan(app: FastAPI):
         try:
             await registry.unregister(owner)
         finally:
+            await app.state.mobilemap_client.close()
             await app.state.services.close()
             await session_redis.aclose()
             await cache_redis.aclose()
@@ -87,6 +91,7 @@ app.include_router(messengers_router)
 app.include_router(payments_router)
 app.include_router(payment_timings_router)
 app.include_router(gis_router)
+app.include_router(mobilemap_router)
 app.include_router(completions_router)
 
 

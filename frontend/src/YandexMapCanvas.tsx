@@ -1,13 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 
-import type { GisFeature } from './api'
+import type { GisFeature } from './MapDataProvider'
 import type { ConfiguredGisMapCanvas, GisMapCanvasProps } from './GisMapCanvas'
 import { renderInBatches } from './GisRenderQueue'
 
 type Basemap = 'map' | 'hybrid'
 
 const BASEMAP_KEY = 'tp-pwa.gis.basemap'
-const UUID = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i
 let sdkPromise: Promise<any> | null = null
 
 export function storedBasemap(storage: Pick<Storage, 'getItem'> = localStorage): Basemap {
@@ -65,11 +64,12 @@ function clippedSegment(start: Point, end: Point, bounds: [number, number, numbe
     if (outside === startCode) { x0 = x; y0 = y } else { x1 = x; y1 = y }
   }
 }
-export const YandexMapCanvas: ConfiguredGisMapCanvas = ({ config, data, position, view, onViewChange, onBoundsChange, onInteractionChange, onSelect, onLocate, locating, initialMapView }) => {
+export const YandexMapCanvas: ConfiguredGisMapCanvas = ({ config, lineTiles, data, position, view, onViewChange, onBoundsChange, onInteractionChange, onSelect, onLocate, locating, initialMapView }) => {
   const node = useRef<HTMLDivElement>(null); const map = useRef<any>(null); const ymaps = useRef<any>(null)
   const pointObjects = useRef<any>(null); const lineObjects = useRef<any>(null); const positionObject = useRef<any>(null); const viewRef = useRef(view); const [basemap, setBasemap] = useState<Basemap>(storedBasemap)
   const [loading, setLoading] = useState(true); const [error, setError] = useState(''); const [fullscreen, setFullscreen] = useState(false)
   const [attempt, setAttempt] = useState(0); const [mapVersion, setMapVersion] = useState(0); const [pointIconSize, setPointIconSize] = useState(POINT_ICON_SIZE); const [pointCircleSize, setPointCircleSize] = useState(POINT_CIRCLE_SIZE); const [pointFixedSizeMaxZoom, setPointFixedSizeMaxZoom] = useState(15)
+  const [instanceVersion, setInstanceVersion] = useState(0)
   const root = useRef<HTMLDivElement>(null)
   const selectRef = useRef(onSelect)
   const renderController = useRef<AbortController | null>(null)
@@ -101,11 +101,11 @@ export const YandexMapCanvas: ConfiguredGisMapCanvas = ({ config, data, position
       map.current.geoObjects.add(lineObjects.current)
       map.current.geoObjects.add(pointObjects.current)
       map.current.geoObjects.add(positionObject.current)
+      setInstanceVersion(value => value + 1)
       setMapVersion(value => value + 1)
       pointObjects.current.objects.events.add('click', (event: any) => {
         const feature = pointFeatures.current.get(String(event.get('objectId')))
-        if (!feature) return
-        if (feature.properties.interactive !== false) selectRef.current(feature)
+        if (feature && feature.properties.interactive !== false) selectRef.current(feature)
       })
       const report = () => {
         const center = map.current.getCenter(); const bounds = map.current.getBounds()
@@ -131,6 +131,20 @@ export const YandexMapCanvas: ConfiguredGisMapCanvas = ({ config, data, position
   }, [attempt, config.scriptUrl])
 
   useEffect(() => {
+    const instance = map.current; const sdk = ymaps.current
+    if (!instance || !sdk || !lineTiles) return
+    const added: any[] = []
+    const suffix = window.devicePixelRatio >= 1.5 ? '@2x.webp' : '.webp'
+    for (const name of ['network', 'poles'] as const) {
+      if (!lineTiles[name]) continue
+      const url = `/api/mobilemap/maps/${encodeURIComponent(lineTiles.mapId)}/tiles/lines/${name}/${encodeURIComponent(lineTiles.version)}/%z/%x/%y${suffix}`
+      const layer = new sdk.Layer(url, { tileTransparent: true, projection: sdk.projection.sphericalMercator })
+      instance.layers.add(layer); added.push(layer)
+    }
+    return () => { if (map.current === instance) for (const layer of added) instance.layers.remove(layer) }
+  }, [lineTiles?.mapId, lineTiles?.version, lineTiles?.network, lineTiles?.poles, instanceVersion])
+
+  useEffect(() => {
     const instance = map.current
     if (!instance) return
     const center = instance.getCenter()
@@ -150,11 +164,14 @@ export const YandexMapCanvas: ConfiguredGisMapCanvas = ({ config, data, position
         if (feature.geometry.type === 'Point') {
           nextPointIds.add(feature.id)
           const props = feature.properties
-          const interactivity = props.interactive === false ? { interactivityModel: 'default#transparent' } : {}
-          const fixedSize = view.zoom < pointFixedSizeMaxZoom; const scale = fixedSize ? 1 : props.iconScale || 1; const iconSize = fixedSize ? pointIconSize : POINT_ICON_SIZE * scale; const circleSize = fixedSize ? pointCircleSize : POINT_CIRCLE_SIZE * scale
-          const markerColor = color(props.iconColor, '#0288d1'); const assetId = props.iconId
-          const options = assetId && UUID.test(assetId)
-            ? { ...interactivity, iconLayout: 'default#image', iconImageHref: `/api/gis/assets/${assetId}${props.recolorIcon ? `?color=${markerColor.slice(1)}` : ''}`, iconImageSize: [iconSize, iconSize], iconImageOffset: [-iconSize / 2, -iconSize / 2] }
+          const interactive = props.interactive !== false
+          const interactivity = interactive
+            ? { cursor: 'pointer' }
+            : { cursor: 'default', interactivityModel: 'default#transparent' }
+          const fixedSize = config.iconFixed || (config.mobilemap ? view.zoom <= pointFixedSizeMaxZoom : view.zoom < pointFixedSizeMaxZoom); const scale = fixedSize ? 1 : config.mobilemap ? Math.max(.5, Math.min(3, props.iconScale || 1)) : props.iconScale || 1; const iconSize = fixedSize ? pointIconSize : (config.mobilemap ? pointIconSize : POINT_ICON_SIZE) * scale; const circleSize = fixedSize ? pointCircleSize : (config.mobilemap ? pointCircleSize : POINT_CIRCLE_SIZE) * scale
+          const markerColor = color(props.iconColor, '#0288d1'); const iconUrl = props.iconUrl
+          const options = iconUrl
+            ? { ...interactivity, iconLayout: 'default#image', iconImageHref: iconUrl, iconImageSize: [iconSize, iconSize], iconImageOffset: [-iconSize / 2, -iconSize / 2] }
             : props.markerShape === 'pin'
               ? { ...interactivity, preset: 'islands#blueDotIcon', iconColor: markerColor, iconImageSize: [iconSize, iconSize] }
               : { ...interactivity, preset: 'islands#circleIcon', iconColor: markerColor, iconImageSize: [circleSize, circleSize] }

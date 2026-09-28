@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 
-import type { GisFeature } from './api'
+import type { GisFeature } from './MapDataProvider'
 import type { ConfiguredGisMapCanvas, GisMapCanvasProps } from './GisMapCanvas'
 import { renderInBatches } from './GisRenderQueue'
 
-const UUID = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i
 const POINT_ICON_SIZE = 32
 const POINT_CIRCLE_SIZE = 22
 let sdkPromise: Promise<any> | null = null
@@ -43,10 +42,9 @@ function markerElement(feature: GisFeature, size: number, circleSize: number, on
   element.type = 'button'; element.className = 'gis-v3-marker'; element.style.width = `${size}px`; element.style.height = `${size}px`
   element.disabled = props.interactive === false
   element.setAttribute('aria-label', props.title || 'Объект карты')
-  if (props.iconId && UUID.test(props.iconId)) {
+  if (props.iconUrl) {
     const image = document.createElement('img')
-    const suffix = props.recolorIcon ? `?color=${markerColor.slice(1)}` : ''
-    image.src = `/api/gis/assets/${props.iconId}${suffix}`; image.alt = ''; image.draggable = false
+    image.src = props.iconUrl; image.alt = ''; image.draggable = false
     element.append(image)
   } else if (props.markerShape === 'pin') {
     element.classList.add('gis-v3-marker-pin'); element.style.setProperty('--gis-marker-color', markerColor)

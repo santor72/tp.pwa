@@ -566,3 +566,8 @@ input:focus, textarea:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px #dbea
   .ticket-card-top { align-items: flex-start; }
   .ticket-kind, .ticket-status { font-size: .74rem; }
 }
+
+.gis-line-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .65rem; padding: .65rem 0; font-size: .85rem; }
+.gis-line-controls label { display: inline-flex; align-items: center; gap: .4rem; min-height: 2rem; }
+.gis-line-controls input { width: 1rem; height: 1rem; }
+.gis-line-controls [role="alert"] { color: #b91c1c; }

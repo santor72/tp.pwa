@@ -1,3 +1,5 @@
+import { mapDataProvider } from './selectedMapDataProvider'
+import type { GisFeature, GisFeatureCollection, GisFeatureDetails, GisLayer, GisMap } from './MapDataProvider'
 import {
   FormEvent,
   KeyboardEvent,
@@ -26,11 +28,6 @@ import {
   TicketDay,
   TicketFilters,
   TicketFilterSelection,
-  GisFeature,
-  GisFeatureCollection,
-  GisFeatureDetails,
-  GisLayer,
-  GisMap,
   GisReportReceipt,
   ConnectionCompletion,
 } from './api'
@@ -77,7 +74,7 @@ function storedGisDefaultLayers(mapId: string): string[] | null {
 }
 
 function initialGisDefaultLayers(layers: GisLayer[]): string[] {
-  return layers.filter(layer => GIS_INITIAL_DEFAULT_LAYER_COUNTS.has(layer.count)).map(layer => layer.id)
+  return layers.filter(layer => layer.defaultVisible ?? GIS_INITIAL_DEFAULT_LAYER_COUNTS.has(layer.count)).map(layer => layer.id)
 }
 
 function connectionCompletionKey(ticketId: number, kind: Ticket['kind']) {
@@ -651,6 +648,7 @@ function GisFeaturePicker({ value, onChange }: { value: string; onChange: (value
   const [mapId, setMapId] = useState('')
   const [data, setData] = useState<GisFeatureCollection | null>(null)
   const [layers, setLayers] = useState<GisLayer[]>([])
+  const [pointLayers, setPointLayers] = useState<string[]>([])
   const [selected, setSelected] = useState<GisFeature | null>(null)
   const [mapView, setMapView] = useState<GisMapView | null>(null)
   const [fallbackBounds, setFallbackBounds] = useState<[number, number, number, number] | null>(null)
@@ -670,11 +668,11 @@ function GisFeaturePicker({ value, onChange }: { value: string; onChange: (value
   useEffect(() => {
     if (!open || maps.length) return
     setLoading(true); setError('')
-    api.gisMaps().then(result => {
-      setMaps(result.rows)
+    mapDataProvider.maps().then(result => {
+      setMaps(result)
       let savedId = ''
       try { savedId = window.localStorage.getItem(GIS_SELECTED_MAP_KEY) || '' } catch { /* storage may be unavailable */ }
-      setMapId(result.rows.find(map => map.id === savedId)?.id || result.rows[0]?.id || '')
+      setMapId(result.find(map => map.id === savedId)?.id || result[0]?.id || '')
     }).catch(cause => setError(errorMessage(cause))).finally(() => setLoading(false))
   }, [open, maps.length])
 
@@ -686,7 +684,7 @@ function GisFeaturePicker({ value, onChange }: { value: string; onChange: (value
   useEffect(() => {
     if (!open || !mapId || !maps.length) return
     let active = true
-    setLoading(true); setError(''); setData(null); setLayers([]); setFallbackBounds(null); setViewportBounds(null); setMapView(null); setMapInteracting(false)
+    setLoading(true); setError(''); setSelected(null); setDetails(null); setData(null); setLayers([]); setFallbackBounds(null); setViewportBounds(null); setMapView(null); setMapInteracting(false)
     initialPositionApplied.current = false
     savedViewRestored.current = false
     try {
@@ -700,10 +698,12 @@ function GisFeaturePicker({ value, onChange }: { value: string; onChange: (value
         }
       }
     } catch { /* storage may be unavailable or contain invalid data */ }
-    Promise.all([api.gisBounds(mapId), api.gisLayers(mapId)]).then(([bounds, result]) => {
+    Promise.all([mapDataProvider.bounds(mapId), mapDataProvider.layers(mapId)]).then(([bounds, result]) => {
       if (!active) return
-      setFallbackBounds([bounds.xmin, bounds.ymin, bounds.xmax, bounds.ymax])
-      setLayers(result.rows)
+      setFallbackBounds(bounds)
+      setLayers(result)
+      const saved = storedGisDefaultLayers(mapId)
+      setPointLayers(saved === null ? result.map(layer => layer.id) : saved.filter(id => result.some(layer => layer.id === id)))
     }).catch(cause => active && setError(errorMessage(cause))).finally(() => active && setLoading(false))
     return () => { active = false }
   }, [open, mapId, maps.length])
@@ -729,13 +729,14 @@ function GisFeaturePicker({ value, onChange }: { value: string; onChange: (value
   }, [])
   useEffect(() => {
     if (!open || !mapId || !viewportBounds || !layers.length || mapInteracting) return
+    if (!pointLayers.length) { setData({ type: 'FeatureCollection', features: [], truncated: false, limit: 0 }); return }
     let active = true
     const controller = new AbortController()
-    const timer = window.setTimeout(() => api.gisFeatures(mapId, viewportBounds, layers.map(layer => layer.id), mapView?.zoom ?? GIS_DEFAULT_ZOOM, controller.signal).then(result => active && setData(result)).catch(cause => {
+    const timer = window.setTimeout(() => mapDataProvider.features({ mapId, bounds: viewportBounds, layerIds: pointLayers, zoom: mapView?.zoom ?? GIS_DEFAULT_ZOOM }, controller.signal).then(result => active && setData(result)).catch(cause => {
       if (active && !(cause instanceof DOMException && cause.name === 'AbortError')) setError(errorMessage(cause))
     }), 250)
     return () => { active = false; window.clearTimeout(timer); controller.abort() }
-  }, [open, mapId, layers.map(layer => layer.id).join(','), viewportBounds?.join(','), mapView?.zoom, mapInteracting])
+  }, [open, mapId, layers.map(layer => layer.id).join(','), pointLayers.join(','), viewportBounds?.join(','), mapView?.zoom, mapInteracting])
   useEffect(() => {
     if (!open || !navigator.geolocation) { if (open) setLocationNotice('Геолокация не поддерживается устройством'); return }
     const watch = navigator.geolocation.watchPosition(value => {
@@ -756,10 +757,17 @@ function GisFeaturePicker({ value, onChange }: { value: string; onChange: (value
       setPosition(next); handleViewChange({ longitude: next.longitude, latitude: next.latitude, zoom: GIS_DEFAULT_ZOOM }); setLocationNotice('Карта центрирована на вашем местоположении'); setLocating(false)
     }, () => { setLocationNotice('Местоположение недоступно. Картой можно пользоваться вручную.'); setLocating(false) }, { enableHighAccuracy: true, maximumAge: 0, timeout: 12_000 })
   }, [handleViewChange])
-  const openFeature = (feature: GisFeature) => {
-    setSelected(feature); setDetails(null); setDetailsError(''); setDetailsLoading(true)
-    api.gisFeature(feature.id).then(setDetails).catch(cause => setDetailsError(errorMessage(cause))).finally(() => setDetailsLoading(false))
-  }
+  useEffect(() => {
+    setDetails(null); setDetailsError(''); setDetailsLoading(Boolean(selected))
+    if (!selected || !open) return
+    const controller = new AbortController()
+    mapDataProvider.feature(selected.id, controller.signal).then(value => {
+      if (!controller.signal.aborted) setDetails(value)
+    }).catch(cause => { if (!controller.signal.aborted) setDetailsError(errorMessage(cause)) })
+      .finally(() => { if (!controller.signal.aborted) setDetailsLoading(false) })
+    return () => controller.abort()
+  }, [selected?.id, open])
+  const openFeature = (feature: GisFeature) => setSelected(feature)
   const closePicker = () => { setOpen(false); setSelected(null); setDetails(null); setDetailsError('') }
   const chosenFeature = selected || data?.features.find(feature => feature.id === value) || null
   const selectedTitle = chosenFeature ? chosenFeature.properties.title || (chosenFeature.properties.number !== undefined ? `Объект №${chosenFeature.properties.number}` : 'Объект сети') : ''
@@ -775,14 +783,21 @@ function GisFeaturePicker({ value, onChange }: { value: string; onChange: (value
         {loading && <p className="gis-feature-loading">Загружаем объекты…</p>}
         {error && <ErrorBox text={error} />}
         {!selected && <>
+          {layers.some(layer => layer.defaultVisible !== undefined) && <details className="gis-layers-panel"><summary>Слои точек</summary><div className="gis-layers">{layers.map(layer => <label key={layer.id}><input type="checkbox" checked={pointLayers.includes(layer.id)} onChange={() => {
+            const next = pointLayers.includes(layer.id) ? pointLayers.filter(id => id !== layer.id) : [...pointLayers, layer.id]
+            setPointLayers(next)
+            try { localStorage.setItem(`${GIS_DEFAULT_LAYERS_KEY_PREFIX}${mapId}`, JSON.stringify(next)) } catch { /* retain session choice */ }
+          }} />{layer.name}</label>)}</div></details>}
+          {data?.truncated && <p className="gis-map-notice">Показана часть объектов. Увеличьте масштаб для подробностей.</p>}
           {locationNotice && <p className="gis-map-notice">{locationNotice}</p>}
-          {mapView && <MapCanvas data={data} position={position} view={mapView} onViewChange={handleViewChange} onBoundsChange={updateViewportBounds} onInteractionChange={setMapInteracting} onSelect={openFeature} onLocate={locate} locating={locating} />}
+          {mapView && <MapCanvas mapId={mapId} data={data} position={position} view={mapView} onViewChange={handleViewChange} onBoundsChange={updateViewportBounds} onInteractionChange={setMapInteracting} onSelect={openFeature} onLocate={locate} locating={locating} />}
         </>}
         {selected && <section className="gis-picker-selection" aria-label="Подтверждение объекта GIS">
           <header><div><small>{selectedLayer}</small><h3>{details?.title || selectedTitle}</h3></div><button type="button" onClick={() => setSelected(null)} aria-label="Вернуться к карте">×</button></header>
           {detailsLoading && <p className="gis-feature-loading">Загружаем карточку объекта…</p>}
           {detailsError && <ErrorBox text={detailsError} />}
-          <div className="gis-picker-actions"><button type="button" className="outline-button" onClick={() => setSelected(null)}>Назад к карте</button><button type="button" className="primary-button" onClick={() => { onChange(selected.id); closePicker() }}>Выбрать этот объект</button></div>
+          {details?.description && <p className="gis-feature-description">{plainGisDescription(details.description)}</p>}
+          <div className="gis-picker-actions"><button type="button" className="outline-button" onClick={() => setSelected(null)}>Назад к карте</button><button type="button" className="primary-button" disabled={detailsLoading || !details || Boolean(detailsError)} onClick={() => { onChange(selected.id); closePicker() }}>Выбрать этот объект</button></div>
         </section>}
       </aside>
     </div>}
@@ -1269,12 +1284,12 @@ function MapScreen({ session }: { session: Session }) {
 
   useEffect(() => {
     let active = true
-    api.gisMaps().then(result => {
+    mapDataProvider.maps().then(result => {
       if (!active) return
-      setMaps(result.rows)
+      setMaps(result)
       let savedId = ''
       try { savedId = window.localStorage.getItem(GIS_SELECTED_MAP_KEY) || '' } catch { /* storage may be unavailable */ }
-      setCurrent(result.rows.find(map => map.id === savedId) ?? result.rows[0] ?? null)
+      setCurrent(result.find(map => map.id === savedId) ?? result[0] ?? null)
     }).catch(cause => active && setError(errorMessage(cause))).finally(() => active && setLoading(false))
     return () => { active = false }
   }, [])
@@ -1299,15 +1314,15 @@ function MapScreen({ session }: { session: Session }) {
         }
       }
     } catch { /* storage may be unavailable or contain invalid data */ }
-    api.gisLayers(current.id).then(result => {
+    mapDataProvider.layers(current.id).then(result => {
       if (!active) return
       const savedLayerIds = storedGisDefaultLayers(current.id)
-      setLayers(result.rows)
-      const availableLayerIds = new Set(result.rows.map(layer => layer.id))
-      setSelectedLayers(savedLayerIds === null ? initialGisDefaultLayers(result.rows) : savedLayerIds.filter(id => availableLayerIds.has(id)))
+      setLayers(result)
+      const availableLayerIds = new Set(result.map(layer => layer.id))
+      setSelectedLayers(savedLayerIds === null ? initialGisDefaultLayers(result) : savedLayerIds.filter(id => availableLayerIds.has(id)))
       setDefaultsSaved(savedLayerIds !== null)
     }).catch(cause => active && setError(errorMessage(cause))).finally(() => active && setLoading(false))
-    api.gisBounds(current.id).then(result => active && setFallbackBounds([result.xmin, result.ymin, result.xmax, result.ymax])).catch(() => active && setFallbackBounds(null))
+    mapDataProvider.bounds(current.id).then(result => active && setFallbackBounds(result)).catch(() => active && setFallbackBounds(null))
     return () => { active = false }
   }, [current?.id])
   useEffect(() => {
@@ -1333,8 +1348,9 @@ function MapScreen({ session }: { session: Session }) {
     if (!current || !layers.length || !viewportBounds || mapInteracting) return
     let active = true
     const layerIds = selectedLayers
+    if (!layerIds.length) { setData({ type: 'FeatureCollection', features: [], truncated: false, limit: 0 }); return }
     const controller = new AbortController()
-    const timer = window.setTimeout(() => api.gisFeatures(current.id, viewportBounds, layerIds, mapView?.zoom ?? GIS_DEFAULT_ZOOM, controller.signal).then(result => active && setData(result)).catch(cause => {
+    const timer = window.setTimeout(() => mapDataProvider.features({ mapId: current.id, bounds: viewportBounds, layerIds, zoom: mapView?.zoom ?? GIS_DEFAULT_ZOOM }, controller.signal).then(result => active && setData(result)).catch(cause => {
       if (active && !(cause instanceof DOMException && cause.name === 'AbortError')) setError(errorMessage(cause))
     }), 250)
     return () => { active = false; window.clearTimeout(timer); controller.abort() }
@@ -1393,10 +1409,17 @@ function MapScreen({ session }: { session: Session }) {
       setDefaultsSaved(false)
     } catch { setError('Не удалось сбросить настройку слоёв') }
   }
-  const openFeature = useCallback((feature: GisFeature) => {
-    setSelected(feature); setSelectedDetails(null); setDetailsError(''); setDetailsLoading(true)
-    api.gisFeature(feature.id).then(setSelectedDetails).catch(cause => setDetailsError(errorMessage(cause))).finally(() => setDetailsLoading(false))
-  }, [])
+  useEffect(() => {
+    setSelectedDetails(null); setDetailsError(''); setDetailsLoading(Boolean(selected))
+    if (!selected) return
+    const controller = new AbortController()
+    mapDataProvider.feature(selected.id, controller.signal).then(value => {
+      if (!controller.signal.aborted) setSelectedDetails(value)
+    }).catch(cause => { if (!controller.signal.aborted) setDetailsError(errorMessage(cause)) })
+      .finally(() => { if (!controller.signal.aborted) setDetailsLoading(false) })
+    return () => controller.abort()
+  }, [selected?.id])
+  const openFeature = useCallback((feature: GisFeature) => setSelected(feature), [])
   const closeFeature = () => { setSelected(null); setSelectedDetails(null); setDetailsError('') }
   return <section className="map-screen">
     <div className="step-heading"><div className="gis-map-heading-row"><h1>Карта сети</h1>{layers.length > 0 && <details className="gis-layers-panel"><summary>Слои <span>{selectedLayers.length} из {layers.length}</span></summary><div className="gis-layers">{layers.map(layer => <label key={layer.id}><input type="checkbox" checked={selectedLayers.includes(layer.id)} onChange={() => toggleLayer(layer.id)} />{layer.name}</label>)}</div><div className="gis-layer-defaults"><span>{defaultsSaved ? 'Настройка по умолчанию сохранена' : 'Используется исходный набор слоёв'}</span><button type="button" className="outline-button" onClick={saveDefaultLayers}>Сохранить как по умолчанию</button>{defaultsSaved && <button type="button" className="outline-button" onClick={resetDefaultLayers}>Сбросить</button>}</div></details>}</div><p>{locationNotice || 'Определяем местоположение…'}</p></div>
@@ -1404,7 +1427,8 @@ function MapScreen({ session }: { session: Session }) {
     {loading && <div className="panel empty-state">Загрузка карты…</div>}
     {!loading && maps.length === 0 && <div className="panel empty-state">Нет доступных карт</div>}
     {maps.length > 1 && <label className="field"><span>Карта</span><select value={current?.id ?? ''} onChange={event => setCurrent(maps.find(map => map.id === event.target.value) ?? null)}>{maps.map(map => <option key={map.id} value={map.id}>{map.name}</option>)}</select></label>}
-    {mapView && <MapCanvas data={data} position={position} view={mapView} onViewChange={handleViewChange} onBoundsChange={updateViewportBounds} onInteractionChange={setMapInteracting} onSelect={openFeature} onLocate={locate} locating={locating} />}
+    {mapView && <MapCanvas mapId={current?.id} data={data} position={position} view={mapView} onViewChange={handleViewChange} onBoundsChange={updateViewportBounds} onInteractionChange={setMapInteracting} onSelect={openFeature} onLocate={locate} locating={locating} />}
+    {data?.truncated && <p className="gis-map-notice">Показана часть объектов. Увеличьте масштаб для подробностей.</p>}
     <GisFeatureCard key={selected?.id} feature={selected} details={selectedDetails} loading={detailsLoading} error={detailsError} csrfToken={session.csrf_token} onClose={closeFeature} />
   </section>
 }

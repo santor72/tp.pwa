@@ -1,0 +1,17 @@
+# Use with compose.yaml. Create the shared network once: docker network create tp-mobilemap
+services:
+  api:
+    environment:
+      MAP_SOURCE: ${MAP_SOURCE:-mobilemap}
+      MOBILEMAP_BASE_URL: ${MOBILEMAP_BASE_URL:-http://mobilemap-api:8000}
+      MOBILEMAP_USERNAME: ${MOBILEMAP_USERNAME:-}
+      MOBILEMAP_PASSWORD: ${MOBILEMAP_PASSWORD:-}
+      MOBILEMAP_TIMEOUT_SECONDS: ${MOBILEMAP_TIMEOUT_SECONDS:-20}
+    networks:
+      - default
+      - mobilemap
+
+networks:
+  mobilemap:
+    name: tp-mobilemap
+    external: true

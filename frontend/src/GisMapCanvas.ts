@@ -1,13 +1,16 @@
 import type { ComponentType } from 'react'
 
-import type { GisBasemapConfig, GisFeature, GisFeatureCollection } from './api'
+import type { GisBasemapConfig } from './api'
+import type { GisBounds, GisFeature, GisFeatureCollection } from './MapDataProvider'
+export type { GisBounds } from './MapDataProvider'
 
 /** Provider-neutral input for a GIS map engine. Coordinates use GeoJSON order. */
 export type GisMapView = { longitude: number; latitude: number; zoom: number }
 export type GisPosition = { longitude: number; latitude: number; accuracy: number }
-export type GisBounds = [west: number, south: number, east: number, north: number]
 
 export type GisMapCanvasProps = {
+  mapId?: string
+  lineTiles?: { mapId: string; version: string; network: boolean; poles: boolean } | null
   data: GisFeatureCollection | null
   position: GisPosition | null
   view: GisMapView

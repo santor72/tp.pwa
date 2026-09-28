@@ -2,6 +2,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import App from '../src/App'
+import { resetMapSource } from '../src/selectedMapDataProvider'
+import { resetMobileMapConfig } from '../src/MobileMapDataProvider'
 
 const session = {
   payment_telemetry_enabled: true,
@@ -60,6 +62,7 @@ afterEach(() => {
 })
 
 beforeEach(() => {
+  resetMapSource(); resetMobileMapConfig()
   let container: HTMLElement | null = null
   let v3Container: HTMLElement | null = null
   const object = () => {
@@ -84,6 +87,7 @@ beforeEach(() => {
     remove(ids: string | string[]) { for (const id of Array.isArray(ids) ? ids : [ids]) { this.markers.get(id)?.remove(); this.markers.delete(id) } }
   }
   class Map {
+    layers = { add: vi.fn(), remove: vi.fn() }
     geoObjects = { add: () => undefined }
     constructor(element: HTMLElement) { container = element }
     getCenter() { return [55.1, 37.2] }
@@ -93,7 +97,7 @@ beforeEach(() => {
     events = { add() {} }
   }
   function GeoObject() { return object() }
-  vi.stubGlobal('ymaps', { ready: (callback: () => void) => callback(), Map, ObjectManager, GeoObjectCollection: Collection, Circle: GeoObject, Placemark: GeoObject, Polygon: GeoObject, Polyline: GeoObject })
+  vi.stubGlobal('ymaps', { Layer: class { constructor(public url: string) {} }, projection: { sphericalMercator: {} }, ready: (callback: () => void) => callback(), Map, ObjectManager, GeoObjectCollection: Collection, Circle: GeoObject, Placemark: GeoObject, Polygon: GeoObject, Polyline: GeoObject })
   class V3Listener { constructor(public handlers: Record<string, (...args: any[]) => void>) {} }
   class V3Marker { constructor(public props: Record<string, unknown>, public element: HTMLElement) {} }
   class V3Feature { constructor(public props: Record<string, unknown>) {} }
@@ -124,6 +128,7 @@ describe('Платёжный терминал', () => {
     let sent: Record<string, unknown> | undefined
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input)
+      if (path === '/api/mobilemap/source') return json({ source: 'gis' })
       if (path === '/api/auth/session') return json(session)
       if (path === '/api/tickets/today' || path === '/api/payments/addresses') return json([])
       if (path.endsWith('/timing')) { sent = JSON.parse(String(init?.body)); throw new Error('offline') }
@@ -168,6 +173,7 @@ describe('Платёжный терминал', () => {
     }
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input)
+      if (path === '/api/mobilemap/source') return json({ source: 'gis' })
       if (path === '/api/auth/session') return json(restrictedSession)
       if (path === '/api/tickets/today') return json([])
       throw new Error(`Неожиданный запрос: ${path}`)
@@ -185,6 +191,7 @@ describe('Платёжный терминал', () => {
     let timingRequest: RequestInit | undefined
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input)
+      if (path === '/api/mobilemap/source') return json({ source: 'gis' })
       if (path === '/api/auth/session') return json({ ...session, payment_telemetry_enabled: enabled })
       if (path === '/api/tickets/today') return json([])
       if (path === '/api/payments/addresses') {
@@ -252,6 +259,7 @@ describe('Платёжный терминал', () => {
   it('пропускает адрес и не показывает квартиру', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input)
+      if (path === '/api/mobilemap/source') return json({ source: 'gis' })
       if (path === '/api/auth/session') return json(session)
       if (path === '/api/tickets/today') return json([])
       if (path === '/api/payments/addresses') return json([])
@@ -269,6 +277,7 @@ describe('Платёжный терминал', () => {
   it('фильтрует адреса без учёта регистра', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input)
+      if (path === '/api/mobilemap/source') return json({ source: 'gis' })
       if (path === '/api/auth/session') return json(session)
       if (path === '/api/tickets/today') return json([])
       if (path === '/api/payments/addresses') return json([{ locid: 1, loctext: 'Земская улица' }, { locid: 2, loctext: 'Лесная улица' }])
@@ -288,6 +297,7 @@ describe('Платёжный терминал', () => {
     sessionStorage.setItem('tp-pwa:active-payment', id)
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input)
+      if (path === '/api/mobilemap/source') return json({ source: 'gis' })
       if (path === '/api/auth/session') return json(session)
       if (path === '/api/tickets/today' || path === '/api/payments/addresses') return json([])
       if (path === `/api/payments/${id}`) return json({
@@ -319,6 +329,7 @@ describe('Платёжный терминал', () => {
     let finished = false
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input)
+      if (path === '/api/mobilemap/source') return json({ source: 'gis' })
       if (path === '/api/auth/session') return json(session)
       if (path === '/api/tickets/today' || path === '/api/payments/addresses') return json([])
       if (path === `/api/payments/${id}`) return json({
@@ -346,6 +357,7 @@ describe('Платёжный терминал', () => {
     sessionStorage.setItem('tp-pwa:active-payment', id)
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input)
+      if (path === '/api/mobilemap/source') return json({ source: 'gis' })
       if (path === '/api/auth/session') return json(session)
       if (path === '/api/tickets/today') return json([])
       if (path === '/api/payments/addresses') return json([])
@@ -378,6 +390,7 @@ describe('Карта сети', () => {
     const featureId = '33333333-3333-4333-8333-333333333333'
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input)
+      if (path === '/api/mobilemap/source') return json({ source: 'gis' })
       if (path === '/api/auth/session') return json(session)
       if (path === '/api/tickets/today') return json([])
       if (path === '/api/gis/basemap') return json({ provider: 'yandex', scriptUrl: 'https://api-maps.yandex.ru/2.1/?apikey=test&lang=ru_RU&csp=true' })
@@ -397,6 +410,8 @@ describe('Карта сети', () => {
     fireEvent.click(layerCheckbox)
     fireEvent.click(screen.getByRole('button', { name: 'Сохранить как по умолчанию' }))
     expect(localStorage.getItem(`tp-pwa.gis.default-layers:${mapId}`)).toBe('[]')
+    await waitFor(() => expect(document.querySelector('.ymaps-feature')).toBeNull())
+    fireEvent.click(layerCheckbox)
     expect(await screen.findByRole('application', { name: 'Карта сети' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Увеличить масштаб' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Уменьшить масштаб' })).toBeTruthy()
@@ -422,6 +437,7 @@ describe('Карта сети', () => {
     let reportRequest: RequestInit | undefined
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input)
+      if (path === '/api/mobilemap/source') return json({ source: 'gis' })
       if (path === '/api/auth/session') return json(session)
       if (path === '/api/tickets/today') return json([])
       if (path === '/api/gis/basemap') return json({ provider: 'yandex', scriptUrl: 'https://api-maps.yandex.ru/2.1/?apikey=test&lang=ru_RU&csp=true' })
@@ -523,6 +539,7 @@ describe('Capabilities', () => {
     }
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input)
+      if (path === '/api/mobilemap/source') return json({ source: 'gis' })
       if (path === '/api/auth/session') return json(managerSession)
       if (path === '/api/tickets/today') return json([])
       if (path === '/api/tickets/today?scope=all') return json([{
@@ -552,6 +569,7 @@ describe('Capabilities', () => {
     }
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input)
+      if (path === '/api/mobilemap/source') return json({ source: 'gis' })
       if (path === '/api/auth/session') return json(managerSession)
       if (path === '/api/tickets/today' || path === '/api/tickets/today?scope=all') return json([])
       if (path === '/api/tickets/filters') return json({
@@ -603,6 +621,7 @@ describe('Привязка Telegram', () => {
   it('создаёт deep-link из PWA', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input)
+      if (path === '/api/mobilemap/source') return json({ source: 'gis' })
       if (path === '/api/auth/session') return json(session)
       if (path === '/api/tickets/today') return json([])
       if (path === '/api/messenger-links') return json([])
@@ -626,6 +645,7 @@ describe('Заявки', () => {
   it('показывает карточку и открывает подробности коротким нажатием', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input)
+      if (path === '/api/mobilemap/source') return json({ source: 'gis' })
       if (path === '/api/auth/session') return json(session)
       if (path === '/api/tickets/today') return json([ticket])
       throw new Error(`Неожиданный запрос: ${path}`)
@@ -651,6 +671,7 @@ describe('Заявки', () => {
     let dialRequest: RequestInit | undefined
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input)
+      if (path === '/api/mobilemap/source') return json({ source: 'gis' })
       if (path === '/api/auth/session') return json(session)
       if (path === '/api/tickets/today') return json([ticket])
       if (path === '/api/conversations/dial') {
@@ -673,6 +694,7 @@ describe('Заявки', () => {
   it('загружает отдельный список для вкладки «Завтра»', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input)
+      if (path === '/api/mobilemap/source') return json({ source: 'gis' })
       if (path === '/api/auth/session') return json(session)
       if (path === '/api/tickets/today') return json([ticket])
       if (path === '/api/tickets/tomorrow') return json([])
@@ -692,6 +714,7 @@ describe('Заявки', () => {
   it('долгим нажатием открывает форму отчёта подключения', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input)
+      if (path === '/api/mobilemap/source') return json({ source: 'gis' })
       if (path === '/api/auth/session') return json(session)
       if (path === '/api/tickets/today') return json([ticket])
       throw new Error(`Неожиданный запрос: ${path}`)
@@ -714,6 +737,7 @@ describe('Заявки', () => {
     let completionRequest: RequestInit | undefined
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input)
+      if (path === '/api/mobilemap/source') return json({ source: 'gis' })
       if (path === '/api/auth/session') return json(session)
       if (path === '/api/tickets/today') return json([ticket])
       if (path === '/api/tickets/32412/connection-completion') {
@@ -740,6 +764,7 @@ describe('Заявки', () => {
     let completionRequest: RequestInit | undefined
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input)
+      if (path === '/api/mobilemap/source') return json({ source: 'gis' })
       if (path === '/api/auth/session') return json(session)
       if (path === '/api/tickets/today') return json([repair])
       if (path === '/api/tickets/32412/ticket-completion') {
@@ -772,6 +797,7 @@ describe('Заявки', () => {
     const featureId = '33333333-3333-4333-8333-333333333333'
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input)
+      if (path === '/api/mobilemap/source') return json({ source: 'gis' })
       if (path === '/api/auth/session') return json(session)
       if (path === '/api/tickets/today') return json([ticket])
       if (path === '/api/gis/basemap') return json({ provider: 'yandex-v3', scriptUrl: 'https://api-maps.yandex.ru/v3/?apikey=test&lang=ru_RU' })
@@ -795,5 +821,63 @@ describe('Заявки', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Выбрать этот объект' }))
     expect(await screen.findByLabelText('Отчёт для GIS')).toBeTruthy()
     expect(localStorage.getItem('tp-pwa.gis.selected-map')).toBe(mapId)
+  })
+})
+
+describe('mobilemap в обоих сценариях', () => {
+  const mapId = '11111111-1111-4111-8111-111111111111'
+  const layerId = '22222222-2222-4222-8222-222222222222'
+  const featureId = '33333333-3333-4333-8333-333333333333'
+
+  it.each(['map', 'picker'] as const)('открывает карточку и использует исходный UUID: %s', async scenario => {
+    let submitted: FormData | undefined
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input)
+      if (path === '/api/auth/session') return json(session)
+      if (path === '/api/tickets/today') return json([ticket])
+      if (path === '/api/mobilemap/source') return json({ source: 'mobilemap' })
+      if (path === '/api/mobilemap/config') return json({ map_provider: 'yandex21', yandex_maps_api_key: 'test', point_detail_zoom: 14, point_icon_size: 32, point_circle_size: 22, point_fixed_size_max_zoom: 15, icon_fixed: true, line_render: 'raster' })
+      if (path === '/api/mobilemap/maps') return json({ rows: [{ id: mapId, name: 'Чехов', report: { total: 1 } }] })
+      if (path === `/api/mobilemap/maps/${mapId}/layers`) return json({ rows: [{ id: layerId, name: 'Муфты', position: 1, count: 1, version: 1 }] })
+      if (path === `/api/mobilemap/maps/${mapId}/bounds`) return json({ xmin: 37.1, ymin: 55, xmax: 37.3, ymax: 55.2 })
+      if (path === `/api/mobilemap/maps/${mapId}/tiles/meta`) return json({ lines_tile_version: 'v1' })
+      if (path.startsWith(`/api/mobilemap/maps/${mapId}/features?`)) return json({ type: 'FeatureCollection', truncated: false, thinned: false, features: [{ type: 'Feature', id: featureId, geometry: { type: 'Point', coordinates: [37.2, 55.1] }, properties: { id: featureId, layer_id: layerId, kind: 'Point', title: 'Муфта mobilemap', style: { iconColor: '#0288d1' } } }] })
+      if (path === `/api/mobilemap/features/${featureId}`) return json({ id: featureId, layer_id: layerId, map_id: mapId, layer_name: 'Муфты', title: 'Муфта mobilemap', number: 42, kind: 'Point', description: 'Карточка из mobilemap', geometry: { type: 'Point', coordinates: [37.2, 55.1] }, style: {}, version: 3 })
+      if (path === '/api/gis/reports') { submitted = init?.body as FormData; return json({ id: 'report', repeated: false }) }
+      if (path === '/api/tickets/32412/connection-completion') {
+        submitted = init?.body as FormData
+        return json({ id: 'completion', ticket_id: 32412, completion_status: 'completed', gis_status: 'delivered' })
+      }
+      throw new Error(`Unexpected request ${path}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<App />)
+    await screen.findByRole('heading', { name: 'Заявки сегодня' })
+    if (scenario === 'map') fireEvent.click(screen.getByRole('button', { name: 'Карта' }))
+    else {
+      fireEvent.click(await screen.findByRole('button', { name: /СНТ Волга/ }))
+      fireEvent.click(screen.getByRole('button', { name: 'Выбрать объект на карте' }))
+    }
+    const map = await screen.findByRole('application', { name: 'Карта сети' })
+    expect((await screen.findByRole('checkbox', { name: 'Сеть (линии)' }) as HTMLInputElement).checked).toBe(true)
+    const poles = screen.getByRole('checkbox', { name: 'Линии столбов' }) as HTMLInputElement
+    expect(poles.checked).toBe(false)
+    fireEvent.click(poles)
+    expect(JSON.parse(localStorage.getItem(`tp-pwa.mobilemap.lines:${mapId}`)!).poles).toBe(true)
+    await waitFor(() => expect(map.querySelector('.ymaps-feature')).not.toBeNull())
+    fireEvent.click(map.querySelector('.ymaps-feature')!)
+    expect(await screen.findByText('Карточка из mobilemap')).toBeTruthy()
+    if (scenario === 'map') {
+      fireEvent.change(screen.getByLabelText('Описание работ'), { target: { value: 'Проверено' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Отправить отчёт' }))
+      await screen.findByText('Отчёт отправлен')
+      expect(submitted?.get('feature_id')).toBe(featureId)
+    } else {
+      fireEvent.click(screen.getByRole('button', { name: 'Выбрать этот объект' }))
+      expect(await screen.findByLabelText('Отчёт для GIS')).toBeTruthy()
+      expect(screen.getByRole('button', { name: /Объект:/ }).textContent).toContain('Муфта mobilemap')
+    }
+    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/api/gis/maps'))).toBe(false)
+    expect(fetchMock.mock.calls.every(([, init]) => !new Headers(init?.headers).has('Authorization'))).toBe(true)
   })
 })

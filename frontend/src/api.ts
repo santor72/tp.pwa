@@ -1,3 +1,6 @@
+import { request } from './http'
+export { ApiError } from './http'
+
 export type UserRole = 'admin' | 'manager' | 'user'
 export type Capabilities = { payments: boolean; gis: boolean; gis_tickets: boolean; connection_photos: boolean; gis_photos: boolean; messenger_settings: boolean; all_tickets: boolean }
 
@@ -82,53 +85,12 @@ export type MessengerLinkCreate = {
   deep_link: string
   expires_at: string
 }
-export type GisMap = { id: string; name: string; created_at: string; report: { total: number } }
 export type GisMapProvider = 'yandex' | 'yandex-v3'
-export type GisBasemapConfig = { provider: GisMapProvider; scriptUrl: string | null; pointIconSize?: number; pointCircleSize?: number; pointFixedSizeMaxZoom?: number }
-export type GisLayer = { id: string; name: string; position: number; count: number; version: number }
-export type GisFeatureStyle = {
-  iconColor?: string; iconId?: string | null; iconScale?: number; markerShape?: 'pin' | 'circle'; recolorIcon?: boolean
-  lineColor?: string; lineWidth?: number; lineOpacity?: number
-  fillColor?: string; fillOpacity?: number
-}
-export type GisFeature = { type: 'Feature'; id: string; geometry: { type: 'Point' | 'LineString' | 'Polygon'; coordinates: unknown }; properties: { id: string; layer_id: string; title?: string; number?: number; kind: string; interactive?: boolean } & GisFeatureStyle }
-export type GisFeatureCollection = { type: 'FeatureCollection'; truncated: boolean; limit: number; features: GisFeature[] }
-export type GisFeatureDetails = { id: string; layer_id: string; map_id: string; layer_name: string; title: string; number: number; kind: string; description: string; geometry: GisFeature['geometry']; style: Record<string, unknown>; version: number }
+export type GisBasemapConfig = { provider: GisMapProvider; scriptUrl: string | null; pointIconSize?: number; pointCircleSize?: number; pointFixedSizeMaxZoom?: number; iconFixed?: boolean; mobilemap?: boolean }
 export type GisReportReceipt = { id: string; external_report_id: string; repeated: boolean; retention_until: string | null }
 export type GisMapReport = { featureId: string; externalReportId: string; completionId: string; text: string; photos: File[] }
 export type ConnectionCompletion = { id: string; ticket_id: number; completion_status: string; gis_status: string; gis_report_id: string | null; error_code: string | null; error_message: string | null; created_at: string; updated_at: string }
 export type ConnectionCompletionPayload = { day: TicketDay; ticketKind?: Ticket['kind']; idempotencyKey: string; techportalText: string; gisText: string; featureId?: string; photos: File[] }
-
-export class ApiError extends Error {
-  constructor(public readonly status: number, public readonly code: string, message: string) {
-    super(message)
-  }
-}
-
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(path, {
-    credentials: 'include',
-    headers: { Accept: 'application/json', ...init.headers },
-    ...init,
-  })
-  if (response.status === 204) return undefined as T
-  const data = await response.json().catch(() => ({}))
-  if (response.status === 401 && path !== '/api/auth/login') {
-    window.dispatchEvent(new Event('auth-expired'))
-  }
-  if (!response.ok) {
-    if (response.status === 413) {
-      throw new ApiError(413, data.code ?? 'REQUEST_TOO_LARGE', data.message ?? 'Размер вложений превышает допустимый для отправки. Уменьшите размер или количество фотографий.')
-    }
-    throw new ApiError(response.status, data.code ?? 'REQUEST_FAILED', data.message ?? 'Ошибка запроса')
-  }
-  return data as T
-}
-
-/** The GIS endpoint uses integer zoom thresholds while vector maps expose fractional zoom. */
-export function gisRequestZoom(zoom: number): number {
-  return Math.max(1, Math.min(23, Math.floor(Number.isFinite(zoom) ? zoom : 15)))
-}
 
 export const api = {
   session: () => request<Session>('/api/auth/session'),
@@ -189,12 +151,7 @@ export const api = {
   revokeTelegramLink: (csrfToken: string) => request<void>('/api/messenger-links/telegram', {
     method: 'DELETE', headers: { 'X-CSRF-Token': csrfToken },
   }),
-  gisMaps: () => request<{ rows: GisMap[] }>('/api/gis/maps'),
   gisBasemap: () => request<GisBasemapConfig>('/api/gis/basemap'),
-  gisLayers: (mapId: string) => request<{ rows: GisLayer[] }>(`/api/gis/maps/${mapId}/layers`),
-  gisBounds: (mapId: string) => request<{ xmin: number; ymin: number; xmax: number; ymax: number }>(`/api/gis/maps/${mapId}/bounds`),
-  gisFeatures: (mapId: string, bbox: [number, number, number, number], layers: string[], zoom: number, signal?: AbortSignal) => request<GisFeatureCollection>(`/api/gis/maps/${mapId}/features?bbox=${bbox.join(',')}&zoom=${gisRequestZoom(zoom)}${layers.length ? `&layers=${encodeURIComponent(layers.join(','))}` : ''}`, { signal }),
-  gisFeature: (featureId: string) => request<GisFeatureDetails>(`/api/gis/features/${featureId}`),
   createGisReport: (report: GisMapReport, csrfToken: string) => {
     const body = new FormData()
     body.set('feature_id', report.featureId)
