@@ -1470,6 +1470,7 @@ function AppShell({ session, onLogout }: { session: Session; onLogout: () => voi
         <div><strong>ТехПортал</strong><span>{session.user.first_name || session.user.email}</span></div>
         <div className="header-actions"><button className="logout-button" onClick={onLogout}>Выйти</button></div>
       </header>
+      <div className="app-content">
       {tab === 'settings' && (messengerSettingsAllowed || gisAllowed)
         ? <Settings session={session} gisAllowed={gisAllowed} mapHeight={mapHeight} mapHeightPercent={mapHeightPercent} onMapHeightChange={setMapHeight} onMapHeightPercentChange={setMapHeightPercent} />
         : tab === 'payments' && paymentsAllowed
@@ -1477,6 +1478,7 @@ function AppShell({ session, onLogout }: { session: Session; onLogout: () => voi
         : tab === 'map' && gisAllowed
         ? <MapScreen session={session} />
         : <Tickets key={ticketDay} day={ticketDay} session={session} />}
+      </div>
       <nav className="bottom-nav" aria-label="Основные разделы">
         <button className={tab === 'today' ? 'active' : ''} onClick={() => setTab('today')} aria-label="Сегодня" title="Сегодня"><span aria-hidden="true">●</span></button>
         <button className={tab === 'tomorrow' ? 'active' : ''} onClick={() => setTab('tomorrow')} aria-label="Завтра" title="Завтра"><span aria-hidden="true">◐</span></button>
