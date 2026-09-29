@@ -69,8 +69,21 @@ function applyGisMapHeight(value: GisMapHeight, percent: number) {
 function storedGisDefaultLayers(mapId: string): string[] | null {
   try {
     const value = JSON.parse(window.localStorage.getItem(`${GIS_DEFAULT_LAYERS_KEY_PREFIX}${mapId}`) || 'null')
+    if (value && !Array.isArray(value) && Array.isArray(value.layers)) return value.layers.every((item: unknown) => typeof item === 'string') ? value.layers : null
     return Array.isArray(value) && value.every(item => typeof item === 'string') ? value : null
   } catch { return null }
+}
+
+function storedGisLineLayers(mapId: string): { network: boolean; poles: boolean } {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(`${GIS_DEFAULT_LAYERS_KEY_PREFIX}${mapId}`) || 'null')
+    if (value && !Array.isArray(value) && value.lineLayers) return { network: value.lineLayers.network !== false, poles: value.lineLayers.poles === true }
+  } catch { /* use defaults */ }
+  try {
+    const oldValue = JSON.parse(window.localStorage.getItem(`tp-pwa.mobilemap.lines:${mapId}`) || 'null')
+    if (oldValue) return { network: oldValue.network !== false, poles: oldValue.poles === true }
+  } catch { /* use defaults */ }
+  return { network: true, poles: false }
 }
 
 function initialGisDefaultLayers(layers: GisLayer[]): string[] {
@@ -786,7 +799,11 @@ function GisFeaturePicker({ value, onChange }: { value: string; onChange: (value
           {layers.some(layer => layer.defaultVisible !== undefined) && <details className="gis-layers-panel"><summary>Слои точек</summary><div className="gis-layers">{layers.map(layer => <label key={layer.id}><input type="checkbox" checked={pointLayers.includes(layer.id)} onChange={() => {
             const next = pointLayers.includes(layer.id) ? pointLayers.filter(id => id !== layer.id) : [...pointLayers, layer.id]
             setPointLayers(next)
-            try { localStorage.setItem(`${GIS_DEFAULT_LAYERS_KEY_PREFIX}${mapId}`, JSON.stringify(next)) } catch { /* retain session choice */ }
+            try {
+              const key = `${GIS_DEFAULT_LAYERS_KEY_PREFIX}${mapId}`
+              const previous = JSON.parse(localStorage.getItem(key) || 'null')
+              localStorage.setItem(key, JSON.stringify({ layers: next, ...(previous && !Array.isArray(previous) && previous.lineLayers ? { lineLayers: previous.lineLayers } : {}) }))
+            } catch { /* retain session choice */ }
           }} />{layer.name}</label>)}</div></details>}
           {data?.truncated && <p className="gis-map-notice">Показана часть объектов. Увеличьте масштаб для подробностей.</p>}
           {locationNotice && <p className="gis-map-notice">{locationNotice}</p>}
@@ -1265,6 +1282,8 @@ function MapScreen({ session }: { session: Session }) {
   const [layers, setLayers] = useState<GisLayer[]>([])
   const [selectedLayers, setSelectedLayers] = useState<string[]>([])
   const [defaultsSaved, setDefaultsSaved] = useState(false)
+  const [lineOptionsAvailable, setLineOptionsAvailable] = useState(false)
+  const [lineLayers, setLineLayers] = useState({ network: true, poles: false })
   const [data, setData] = useState<GisFeatureCollection | null>(null)
   const [selected, setSelected] = useState<GisFeature | null>(null)
   const [selectedDetails, setSelectedDetails] = useState<GisFeatureDetails | null>(null)
@@ -1321,6 +1340,7 @@ function MapScreen({ session }: { session: Session }) {
       const availableLayerIds = new Set(result.map(layer => layer.id))
       setSelectedLayers(savedLayerIds === null ? initialGisDefaultLayers(result) : savedLayerIds.filter(id => availableLayerIds.has(id)))
       setDefaultsSaved(savedLayerIds !== null)
+      setLineLayers(storedGisLineLayers(current.id))
     }).catch(cause => active && setError(errorMessage(cause))).finally(() => active && setLoading(false))
     mapDataProvider.bounds(current.id).then(result => active && setFallbackBounds(result)).catch(() => active && setFallbackBounds(null))
     return () => { active = false }
@@ -1397,7 +1417,7 @@ function MapScreen({ session }: { session: Session }) {
   const saveDefaultLayers = () => {
     if (!current) return
     try {
-      window.localStorage.setItem(`${GIS_DEFAULT_LAYERS_KEY_PREFIX}${current.id}`, JSON.stringify(selectedLayers))
+      window.localStorage.setItem(`${GIS_DEFAULT_LAYERS_KEY_PREFIX}${current.id}`, JSON.stringify({ layers: selectedLayers, lineLayers }))
       setDefaultsSaved(true)
     } catch { setError('Не удалось сохранить настройку слоёв') }
   }
@@ -1405,7 +1425,9 @@ function MapScreen({ session }: { session: Session }) {
     if (!current) return
     try {
       window.localStorage.removeItem(`${GIS_DEFAULT_LAYERS_KEY_PREFIX}${current.id}`)
+      window.localStorage.removeItem(`tp-pwa.mobilemap.lines:${current.id}`)
       setSelectedLayers(initialGisDefaultLayers(layers))
+      setLineLayers({ network: true, poles: false })
       setDefaultsSaved(false)
     } catch { setError('Не удалось сбросить настройку слоёв') }
   }
@@ -1422,12 +1444,12 @@ function MapScreen({ session }: { session: Session }) {
   const openFeature = useCallback((feature: GisFeature) => setSelected(feature), [])
   const closeFeature = () => { setSelected(null); setSelectedDetails(null); setDetailsError('') }
   return <section className="map-screen">
-    <div className="step-heading"><div className="gis-map-heading-row"><h1>Карта сети</h1>{layers.length > 0 && <details className="gis-layers-panel"><summary>Слои <span>{selectedLayers.length} из {layers.length}</span></summary><div className="gis-layers">{layers.map(layer => <label key={layer.id}><input type="checkbox" checked={selectedLayers.includes(layer.id)} onChange={() => toggleLayer(layer.id)} />{layer.name}</label>)}</div><div className="gis-layer-defaults"><span>{defaultsSaved ? 'Настройка по умолчанию сохранена' : 'Используется исходный набор слоёв'}</span><button type="button" className="outline-button" onClick={saveDefaultLayers}>Сохранить как по умолчанию</button>{defaultsSaved && <button type="button" className="outline-button" onClick={resetDefaultLayers}>Сбросить</button>}</div></details>}</div><p>{locationNotice || 'Определяем местоположение…'}</p></div>
+    <div className="step-heading"><div className="gis-map-heading-row"><h1>Карта сети</h1>{layers.length > 0 && <details className="gis-layers-panel"><summary>Слои <span>{selectedLayers.length} из {layers.length}{lineOptionsAvailable ? ` · ${Number(lineLayers.network) + Number(lineLayers.poles)} линий` : ''}</span></summary><div className="gis-layers">{layers.map(layer => <label key={layer.id}><input type="checkbox" checked={selectedLayers.includes(layer.id)} onChange={() => toggleLayer(layer.id)} />{layer.name}</label>)}{lineOptionsAvailable && <><label><input type="checkbox" checked={lineLayers.network} onChange={() => setLineLayers(value => ({ ...value, network: !value.network }))} />Сеть (линии)</label><label><input type="checkbox" checked={lineLayers.poles} onChange={() => setLineLayers(value => ({ ...value, poles: !value.poles }))} />Линии столбов</label></>}</div><div className="gis-layer-defaults"><span>{defaultsSaved ? 'Настройка по умолчанию сохранена' : 'Используется исходный набор слоёв'}</span><button type="button" className="outline-button" onClick={saveDefaultLayers}>Сохранить как по умолчанию</button>{defaultsSaved && <button type="button" className="outline-button" onClick={resetDefaultLayers}>Сбросить</button>}</div></details>}</div><p>{locationNotice || 'Определяем местоположение…'}</p></div>
     {error && <ErrorBox text={error} />}
     {loading && <div className="panel empty-state">Загрузка карты…</div>}
     {!loading && maps.length === 0 && <div className="panel empty-state">Нет доступных карт</div>}
     {maps.length > 1 && <label className="field"><span>Карта</span><select value={current?.id ?? ''} onChange={event => setCurrent(maps.find(map => map.id === event.target.value) ?? null)}>{maps.map(map => <option key={map.id} value={map.id}>{map.name}</option>)}</select></label>}
-    {mapView && <MapCanvas mapId={current?.id} data={data} position={position} view={mapView} onViewChange={handleViewChange} onBoundsChange={updateViewportBounds} onInteractionChange={setMapInteracting} onSelect={openFeature} onLocate={locate} locating={locating} />}
+    {mapView && <MapCanvas mapId={current?.id} data={data} position={position} view={mapView} lineVisibility={lineLayers} onLineVisibilityChange={setLineLayers} onLineOptionsChange={setLineOptionsAvailable} onViewChange={handleViewChange} onBoundsChange={updateViewportBounds} onInteractionChange={setMapInteracting} onSelect={openFeature} onLocate={locate} locating={locating} />}
     {data?.truncated && <p className="gis-map-notice">Показана часть объектов. Увеличьте масштаб для подробностей.</p>}
     <GisFeatureCard key={selected?.id} feature={selected} details={selectedDetails} loading={detailsLoading} error={detailsError} csrfToken={session.csrf_token} onClose={closeFeature} />
   </section>

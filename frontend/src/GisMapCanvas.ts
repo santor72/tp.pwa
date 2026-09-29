@@ -11,6 +11,9 @@ export type GisPosition = { longitude: number; latitude: number; accuracy: numbe
 export type GisMapCanvasProps = {
   mapId?: string
   lineTiles?: { mapId: string; version: string; network: boolean; poles: boolean } | null
+  lineVisibility?: { network: boolean; poles: boolean }
+  onLineVisibilityChange?: (value: { network: boolean; poles: boolean }) => void
+  onLineOptionsChange?: (available: boolean) => void
   data: GisFeatureCollection | null
   position: GisPosition | null
   view: GisMapView
