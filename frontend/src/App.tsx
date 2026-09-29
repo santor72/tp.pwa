@@ -13,6 +13,7 @@ import {
 import { paymentCommands } from './paymentCommands'
 import { ProviderMapCanvas } from './ProviderMapCanvas'
 import type { GisMapCanvasProps, GisMapView, GisPosition } from './GisMapCanvas'
+import { createPortal } from 'react-dom'
 
 import {
   api,
@@ -788,7 +789,7 @@ function GisFeaturePicker({ value, onChange }: { value: string; onChange: (value
   return <>
     <button type="button" className="outline-button gis-picker-button" onClick={event => { event.preventDefault(); setOpen(true) }}>{value ? `Объект: ${selectedTitle || value}` : 'Выбрать объект на карте'}</button>
     {value && <button type="button" className="gis-clear-feature" onClick={() => onChange('')}>Не отправлять в GIS</button>}
-    {open && <div className="gis-feature-backdrop" onClick={closePicker}>
+    {open && createPortal(<div className="gis-feature-backdrop" onClick={closePicker}>
       <aside className="gis-feature-card gis-picker" role="dialog" aria-modal="true" aria-label="Выбрать объект GIS" onClick={event => event.stopPropagation()}>
         <div className="gis-feature-handle" />
         <header><div><small>Объект необязателен</small><h2>Выбрать объект GIS</h2></div><button type="button" onClick={closePicker} aria-label="Закрыть выбор объекта">×</button></header>
@@ -817,7 +818,7 @@ function GisFeaturePicker({ value, onChange }: { value: string; onChange: (value
           <div className="gis-picker-actions"><button type="button" className="outline-button" onClick={() => setSelected(null)}>Назад к карте</button><button type="button" className="primary-button" disabled={detailsLoading || !details || Boolean(detailsError)} onClick={() => { onChange(selected.id); closePicker() }}>Выбрать этот объект</button></div>
         </section>}
       </aside>
-    </div>}
+    </div>, document.body)}
   </>
 }
 
@@ -1259,7 +1260,7 @@ function GisFeatureCard({ feature, details, loading, error, csrfToken, onClose }
   const description = details ? plainGisDescription(details.description || '') : ''
   const title = details?.title?.trim() || feature.properties.title?.trim() || (feature.properties.number !== undefined ? `Объект №${feature.properties.number}` : 'Объект сети')
   const layerName = details?.layer_name?.trim() || 'Объект сети'
-  return <div className="gis-feature-backdrop" onClick={onClose}>
+  return createPortal(<div className="gis-feature-backdrop" onClick={onClose}>
     <aside className="gis-feature-card" role="dialog" aria-modal="true" aria-label="Карточка объекта" onClick={event => event.stopPropagation()}>
       <div className="gis-feature-handle" />
       <header><div><small>{layerName}</small><h2>{title}</h2></div><button type="button" onClick={onClose} aria-label="Закрыть карточку объекта">×</button></header>
@@ -1273,7 +1274,7 @@ function GisFeatureCard({ feature, details, loading, error, csrfToken, onClose }
         <GisReportForm featureId={details.id} csrfToken={csrfToken} />
       </>}
     </aside>
-  </div>
+  </div>, document.body)
 }
 
 function MapScreen({ session }: { session: Session }) {
