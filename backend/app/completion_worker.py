@@ -23,6 +23,8 @@ async def run() -> None:
                 await services.connection_completion_service.reconcile_techportal(operation_id)
             for operation_id in await services.completion_repository.claim_gis(settings.gis_completion_worker_batch_size):
                 await services.connection_completion_service.send_gis(operation_id)
+            for operation_id in await services.completion_repository.claim_techportal_gis_links(settings.gis_completion_worker_batch_size):
+                await services.connection_completion_service.send_techportal_gis_link(operation_id)
             try:
                 await asyncio.wait_for(stop.wait(), timeout=settings.gis_completion_worker_poll_seconds)
             except TimeoutError:

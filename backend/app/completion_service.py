@@ -52,6 +52,7 @@ class ConnectionCompletionService:
             subscriber_login=subscriber.get('login'), subscriber_address=subscriber.get('address'),
             techportal_text=techportal_text, gis_text=gis_text, subscriber=subscriber, photos=[], completion_status='prepared',
             gis_status='not_ready' if feature_id else 'not_requested',
+            techportal_gis_link_status='waiting_gis' if feature_id else 'not_requested',
         )
         if not created:
             if (operation.user_id != actor.user_id or operation.ticket_id != ticket_id or operation.day != day
@@ -181,8 +182,36 @@ class ConnectionCompletionService:
         return await self._mark_gis_delivered(operation_id, receipt)
 
     async def _mark_gis_delivered(self, operation_id: UUID, receipt: dict[str, Any]) -> Any:
-        return await self._repository.update(operation_id, gis_status='delivered', gis_report_id=str(receipt.get('id')),
+        operation = await self._repository.update(operation_id, gis_status='delivered', gis_report_id=str(receipt.get('id')),
+                                             techportal_gis_link_status='pending', techportal_gis_link_next_attempt_at=datetime.now(UTC),
                                              next_attempt_at=None, lease_until=None, last_error_code=None, last_error_message=None)
+        return await self.send_techportal_gis_link(operation.id)
+
+    async def send_techportal_gis_link(self, operation_id: UUID) -> Any:
+        operation = await self._repository.get(operation_id)
+        if operation is None or operation.gis_status != 'delivered' or operation.techportal_gis_link_status not in {'pending', 'retry_wait', 'sending'}:
+            return operation
+        operation = await self._repository.update(operation_id, techportal_gis_link_status='sending',
+            techportal_gis_link_lease_until=datetime.now(UTC) + timedelta(minutes=5))
+        map_id = (operation.feature_snapshot or {}).get('map_id')
+        if not map_id or not operation.feature_id or not operation.gis_report_id:
+            return await self._repository.update(operation_id, techportal_gis_link_status='failed', techportal_gis_link_lease_until=None)
+        link = self._gis.report_url(map_id, operation.feature_id, operation.gis_report_id)
+        comment = '\n'.join(part for part in [operation.techportal_comment or '', link] if part)
+        try:
+            result = await self._tickets.append_completion_comment(operation.technician_external_id,
+                operation.ticket_id, comment, operation.ticket_kind)
+        except (ServiceUnavailableError, TechPortalCallError, ApiError) as exc:
+            await self._repository.add_attempt(operation_id, system='techportal', action='add_gis_link', success=False,
+                error_code=exc.code, error_message=exc.message, response_body={})
+            return await self._repository.update(operation_id, techportal_gis_link_status='retry_wait',
+                techportal_gis_link_attempt_count=operation.techportal_gis_link_attempt_count + 1,
+                techportal_gis_link_next_attempt_at=datetime.now(UTC) + timedelta(minutes=1),
+                techportal_gis_link_lease_until=None)
+        await self._repository.add_attempt(operation_id, system='techportal', action='add_gis_link', success=True,
+            response_body=result.model_dump(mode='json'))
+        return await self._repository.update(operation_id, techportal_gis_link_status='delivered',
+            techportal_gis_link_next_attempt_at=None, techportal_gis_link_lease_until=None)
 
     @staticmethod
     def _comment(first_name: str, last_name: str, text: str, photos: list[dict[str, Any]]) -> str:

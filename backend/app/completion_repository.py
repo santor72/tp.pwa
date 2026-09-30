@@ -109,3 +109,22 @@ class CompletionRepository:
                 row.lease_until = now + timedelta(minutes=5)
             await session.commit()
             return [row.id for row in rows]
+
+    async def claim_techportal_gis_links(self, limit: int, now: datetime | None = None) -> list[UUID]:
+        now = now or datetime.now(UTC)
+        async with self._sessions() as session:
+            rows = list(await session.scalars(select(ConnectionCompletionOperation).where(
+                ConnectionCompletionOperation.gis_status == 'delivered',
+                or_(
+                    (ConnectionCompletionOperation.techportal_gis_link_status.in_({'pending', 'retry_wait'})) &
+                    (ConnectionCompletionOperation.techportal_gis_link_next_attempt_at.is_(None) |
+                     (ConnectionCompletionOperation.techportal_gis_link_next_attempt_at <= now)),
+                    (ConnectionCompletionOperation.techportal_gis_link_status == 'sending') &
+                    (ConnectionCompletionOperation.techportal_gis_link_lease_until <= now),
+                ),
+            ).order_by(ConnectionCompletionOperation.created_at).with_for_update(skip_locked=True).limit(limit)))
+            for row in rows:
+                row.techportal_gis_link_status = 'sending'
+                row.techportal_gis_link_lease_until = now + timedelta(minutes=5)
+            await session.commit()
+            return [row.id for row in rows]

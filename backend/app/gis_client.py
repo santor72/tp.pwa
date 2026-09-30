@@ -2,6 +2,7 @@ import logging
 import json
 import os
 import time
+from urllib.parse import urlencode
 import zlib
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,10 @@ class GisClient:
     async def close(self) -> None:
         if self._owned_client:
             await self._client.aclose()
+
+    def report_url(self, map_id: str, feature_id: str, report_id: str) -> str:
+        query = urlencode({'map': str(map_id), 'feature': str(feature_id), 'report': str(report_id)})
+        return f'{self._settings.gis_base_url.rstrip('/')}/?{query}'
 
     async def maps(self) -> dict[str, Any]: return await self._request('GET', 'maps')
     async def layers(self, map_id: str) -> dict[str, Any]: return await self._request('GET', f'maps/{map_id}/layers')

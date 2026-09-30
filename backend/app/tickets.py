@@ -220,6 +220,21 @@ class TicketService:
         users = await self._user_names()
         return self._normalize(ticket.model_copy(update=persisted_fields), users)
 
+    async def append_completion_comment(self, user_id: int | str, ticket_id: int, comment: str,
+                                        ticket_kind: Literal['connection', 'repair']) -> TicketResponse:
+        raw_ticket = await self._client.ticket_by_id(ticket_id)
+        if raw_ticket is None:
+            raise TicketNotFoundError()
+        ticket = TechPortalTicket.model_validate(raw_ticket)
+        if (not self._is_master(ticket, user_id)
+                or (CONNECTION_TAG in ticket.tags) != (ticket_kind == 'connection')
+                or COMPLETED_TAG not in ticket.tags):
+            raise TicketNotFoundError()
+        raw_ticket['comments'] = comment
+        persisted = await self._client.persist_ticket_with_comment(raw_ticket)
+        persisted_fields = {field_name: getattr(persisted, field_name) for field_name in persisted.model_fields_set}
+        return self._normalize(ticket.model_copy(update=persisted_fields), await self._user_names())
+
     async def connection_completion_recorded(self, user_id: int | str, ticket_id: int, comment: str) -> bool:
         return await self.ticket_completion_recorded(user_id, ticket_id, comment, 'connection')
 
