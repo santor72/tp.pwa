@@ -42,15 +42,14 @@ class ConnectionCompletionService:
             raise ApiError(503, 'GIS_PHOTO_STORAGE_NOT_CONFIGURED', 'Для отправки фотографий в GIS требуется настроенное S3-хранилище')
         if photos and not self.photos_available and not feature_id:
             raise ApiError(503, 'PHOTO_STORAGE_NOT_CONFIGURED', 'Загрузка фотографий для заявок не настроена')
-        subscriber = await self._tickets.gis_subscriber(
-            actor.techportal_user_id, ticket_id, ticket_kind,
-        ) if feature_id else {}
+        subscriber = await self._tickets.gis_subscriber(actor.techportal_user_id, ticket_id, ticket_kind)
         feature_snapshot = await self._gis.feature(str(feature_id)) if feature_id else {}
         operation, created = await self._repository.create_or_get(
             idempotency_key=idempotency_key, ticket_id=ticket_id, ticket_kind=ticket_kind, day=day, user_id=actor.user_id,
             technician_external_id=actor.techportal_user_id, technician_name=technician_name,
             technician_last_name=technician_last_name,
             feature_id=feature_id, feature_snapshot=feature_snapshot, external_report_id=uuid4() if feature_id else None,
+            subscriber_login=subscriber.get('login'), subscriber_address=subscriber.get('address'),
             techportal_text=techportal_text, gis_text=gis_text, subscriber=subscriber, photos=[], completion_status='prepared',
             gis_status='not_ready' if feature_id else 'not_requested',
         )
@@ -82,16 +81,22 @@ class ConnectionCompletionService:
         if operation is None or operation.completion_status != 'marking':
             return operation
         try:
-            await self._tickets.mark_ticket_completed(operation.technician_external_id, operation.day,
+            result = await self._tickets.mark_ticket_completed(operation.technician_external_id, operation.day,
                                                       operation.ticket_id, operation.techportal_comment or '', operation.ticket_kind)
         except (ServiceUnavailableError, TechPortalCallError) as exc:
+            await self._repository.add_attempt(operation_id, system='techportal', action='close', success=False,
+                error_code=exc.code, error_message=exc.message, response_body={})
             return await self._repository.update(operation_id, completion_status='completion_unknown',
                                                  next_attempt_at=datetime.now(UTC) + timedelta(minutes=1), lease_until=None,
                                                  last_error_code=exc.code, last_error_message=exc.message)
         except ApiError as exc:
+            await self._repository.add_attempt(operation_id, system='techportal', action='close', success=False,
+                error_code=exc.code, error_message=exc.message, response_body={})
             return await self._repository.update(operation_id, completion_status='completion_failed',
                                                  last_error_code=exc.code, last_error_message=exc.message)
-        operation = await self._repository.update(operation_id, completion_status='completed',
+        await self._repository.add_attempt(operation_id, system='techportal', action='close', success=True,
+            response_body=result.model_dump(mode='json'))
+        operation = await self._repository.update(operation_id, completion_status='completed', techportal_completed_at=datetime.now(UTC),
                                                   last_error_code=None, last_error_message=None,
                                                   gis_status='pending' if operation.feature_id else 'not_requested',
                                                   next_attempt_at=datetime.now(UTC) if operation.feature_id else None)
@@ -160,13 +165,19 @@ class ConnectionCompletionService:
             except ServiceUnavailableError:
                 receipt = None
             if receipt is not None:
+                await self._repository.add_attempt(operation_id, system='gis', action='lookup', success=True, response_body=receipt)
                 return await self._mark_gis_delivered(operation_id, receipt)
+            await self._repository.add_attempt(operation_id, system='gis', action='send', success=False,
+                error_code=exc.code, error_message=exc.message, response_body={})
             return await self._repository.update(operation_id, gis_status='retry_wait',
                 attempt_count=operation.attempt_count + 1, next_attempt_at=datetime.now(UTC) + timedelta(minutes=1),
                 lease_until=None, last_error_code=exc.code, last_error_message=exc.message)
         except ApiError as exc:
+            await self._repository.add_attempt(operation_id, system='gis', action='send', success=False,
+                error_code=exc.code, error_message=exc.message, response_body={})
             return await self._repository.update(operation_id, gis_status='needs_attention',
                 lease_until=None, last_error_code=exc.code, last_error_message=exc.message)
+        await self._repository.add_attempt(operation_id, system='gis', action='send', success=True, response_body=receipt)
         return await self._mark_gis_delivered(operation_id, receipt)
 
     async def _mark_gis_delivered(self, operation_id: UUID, receipt: dict[str, Any]) -> Any:

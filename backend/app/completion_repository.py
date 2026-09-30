@@ -1,11 +1,11 @@
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.models import ConnectionCompletionOperation
+from app.models import ConnectionCompletionOperation, CompletionIntegrationAttempt
 
 
 class CompletionRepository:
@@ -35,6 +35,34 @@ class CompletionRepository:
     async def get(self, operation_id: UUID) -> ConnectionCompletionOperation | None:
         async with self._sessions() as session:
             return await session.get(ConnectionCompletionOperation, operation_id)
+
+    async def add_attempt(self, operation_id: UUID, **values) -> None:
+        async with self._sessions() as session:
+            session.add(CompletionIntegrationAttempt(operation_id=operation_id, **values))
+            await session.commit()
+
+    async def admin_list(self, *, date_from=None, date_to=None, ticket_id=None, login=None, employee=None,
+                         completion_status=None, gis_status=None, page=1, page_size=50):
+        async with self._sessions() as session:
+            query = select(ConnectionCompletionOperation)
+            if date_from is not None: query = query.where(ConnectionCompletionOperation.created_at >= date_from)
+            if date_to is not None: query = query.where(ConnectionCompletionOperation.created_at < date_to)
+            if ticket_id is not None: query = query.where(ConnectionCompletionOperation.ticket_id == ticket_id)
+            if login: query = query.where(ConnectionCompletionOperation.subscriber_login.ilike(f'%{login}%'))
+            if employee: query = query.where(ConnectionCompletionOperation.technician_name.ilike(f'%{employee}%'))
+            if completion_status: query = query.where(ConnectionCompletionOperation.completion_status == completion_status)
+            if gis_status: query = query.where(ConnectionCompletionOperation.gis_status == gis_status)
+            total = await session.scalar(select(func.count()).select_from(query.subquery()))
+            rows = list(await session.scalars(query.order_by(ConnectionCompletionOperation.created_at.desc()).offset((page-1)*page_size).limit(page_size)))
+            return rows, total or 0
+
+    async def admin_get(self, operation_id: UUID):
+        async with self._sessions() as session:
+            operation = await session.get(ConnectionCompletionOperation, operation_id)
+            if operation is None: return None, []
+            attempts = list(await session.scalars(select(CompletionIntegrationAttempt).where(
+                CompletionIntegrationAttempt.operation_id == operation_id).order_by(CompletionIntegrationAttempt.created_at)))
+            return operation, attempts
 
     async def update(self, operation_id: UUID, **values) -> ConnectionCompletionOperation:
         async with self._sessions() as session:

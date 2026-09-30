@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import './style.css'
 import Timings from './Timings'
+import Completions from './Completions'
 
 type Session = { user: { first_name: string | null; email: string; role: string }; csrf_token: string; capabilities: { payment_admin: boolean } }
 type Payment = { id:string; created_at:string; paid_at:string|null; actual_amount:string; currency:string; product_title:string; status:string; phone:string; email:string|null; address_text:string|null; apartment:string|null; employee_display_name:string|null; employee_external_id:string|null; bitrix_invoice_id:number|null; bitrix_payment_id:number|null; bitrix_pay_system_name:string|null }
@@ -15,6 +16,6 @@ function Registry({session,onLogout}:{session:Session;onLogout:()=>void}) { cons
 function App(props: { session: Session; onLogout: () => void }) {
   const [tab, setTab] = useState('registry')
   if (!props.session.capabilities.payment_admin) return <main className="center">Доступ запрещён. Нужна роль администратора.</main>
-  return <><nav className="shell"><button onClick={() => setTab('registry')}>Реестр оплат</button><button onClick={() => setTab('timings')}>Скорость формирования</button>{tab === 'timings' && <button onClick={props.onLogout}>Выйти</button>}</nav>{tab === 'registry' ? <Registry {...props} /> : <Timings csrf={props.session.csrf_token} />}</>
+  return <><nav className="shell"><button onClick={() => setTab('registry')}>Реестр оплат</button><button onClick={() => setTab('completions')}>Закрытия заявок</button><button onClick={() => setTab('timings')}>Скорость формирования</button>{tab === 'timings' && <button onClick={props.onLogout}>Выйти</button>}</nav>{tab === 'registry' ? <Registry {...props} /> : tab === 'completions' ? <Completions /> : <Timings csrf={props.session.csrf_token} />}</>
 }
 function Root(){const [session,setSession]=useState<Session|null>(null),[loading,setLoading]=useState(true);useEffect(()=>{api.session().then(setSession).catch(()=>{}).finally(()=>setLoading(false))},[]);if(loading)return <main className="center">Загрузка…</main>;if(!session)return <Login onLogin={setSession}/>;return <App session={session} onLogout={()=>api.logout(session.csrf_token).then(()=>setSession(null))}/>};createRoot(document.getElementById('root')!).render(<Root/>)

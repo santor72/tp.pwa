@@ -279,6 +279,9 @@ class ConnectionCompletionOperation(Base):
     techportal_text: Mapped[str] = mapped_column(Text, nullable=False, default='')
     gis_text: Mapped[str] = mapped_column(Text, nullable=False, default='')
     subscriber: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    subscriber_login: Mapped[str | None] = mapped_column(String(255))
+    subscriber_address: Mapped[str | None] = mapped_column(Text)
+    techportal_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     photos: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     techportal_comment: Mapped[str | None] = mapped_column(Text)
     completion_status: Mapped[str] = mapped_column(String(32), nullable=False, default='prepared')
@@ -296,3 +299,18 @@ class ConnectionCompletionOperation(Base):
         Index('ix_connection_completion_gis_due', 'gis_status', 'next_attempt_at'),
         Index('ix_connection_completion_ticket_created', 'ticket_id', 'created_at'),
     )
+
+
+class CompletionIntegrationAttempt(Base):
+    __tablename__ = 'completion_integration_attempts'
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    operation_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey('connection_completion_operations.id', ondelete='CASCADE'), nullable=False)
+    system: Mapped[str] = mapped_column(String(32), nullable=False)
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    success: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    http_status: Mapped[int | None] = mapped_column(Integer)
+    response_body: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    error_code: Mapped[str | None] = mapped_column(String(128))
+    error_message: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    __table_args__ = (Index('ix_completion_attempt_operation_created', 'operation_id', 'created_at'),)
