@@ -66,7 +66,7 @@ async def completion_detail(operation_id: UUID, request: Request, admin=Depends(
         gis_address = request.app.state.settings.gis_base_url.rstrip('/')
         if gis_address:
             query = urlencode({'map': str(map_id), 'feature': str(operation.feature_id),
-                               'report': str(operation.external_report_id)})
+                               'report': str(operation.id)})
             gis_report_url = f'{gis_address}/?{query}'
     return Detail(**Item.model_validate(operation, from_attributes=True).model_dump(),
         attempts=[Attempt.model_validate(row, from_attributes=True) for row in attempts],
