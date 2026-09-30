@@ -62,11 +62,11 @@ async def completion_detail(operation_id: UUID, request: Request, admin=Depends(
     if operation is None: raise HTTPException(404, 'Операция закрытия не найдена')
     gis_report_url = None
     map_id = (operation.feature_snapshot or {}).get('map_id')
-    if operation.gis_status == 'delivered' and map_id and operation.feature_id and operation.external_report_id:
+    if operation.gis_status == 'delivered' and map_id and operation.feature_id and operation.gis_report_id:
         gis_address = request.app.state.settings.gis_base_url.rstrip('/')
         if gis_address:
             query = urlencode({'map': str(map_id), 'feature': str(operation.feature_id),
-                               'report': str(operation.external_report_id)})
+                               'report': operation.gis_report_id})
             gis_report_url = f'{gis_address}/?{query}'
     return Detail(**Item.model_validate(operation, from_attributes=True).model_dump(),
         attempts=[Attempt.model_validate(row, from_attributes=True) for row in attempts],
