@@ -430,7 +430,7 @@ describe('Карта сети', () => {
     expect(fetchMock.mock.calls.some(([path]) => String(path).startsWith('https://'))).toBe(false)
   })
 
-  it('отправляет текстовый отчёт выбранного объекта через защищённый маршрут PWA', async () => {
+  it('отправляет отчёт с HEIC и ненадёжным MIME через защищённый маршрут PWA', async () => {
     const mapId = '11111111-1111-4111-8111-111111111111'
     const layerId = '22222222-2222-4222-8222-222222222222'
     const featureId = '33333333-3333-4333-8333-333333333333'
@@ -457,11 +457,15 @@ describe('Карта сети', () => {
     fireEvent.click(map.querySelector('.ymaps-feature')!)
     const text = await screen.findByLabelText('Описание работ')
     fireEvent.change(text, { target: { value: 'Заменили муфту' } })
+    const photo = new File(['heic bytes'], 'phone.heic', { type: 'application/octet-stream' })
+    fireEvent.change(screen.getByLabelText('Фотографии'), { target: { files: [photo] } })
+    expect(screen.getByText('Выбрано фотографий: 1')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Отправить отчёт' }))
     expect(await screen.findByText('Отчёт отправлен')).toBeTruthy()
     const body = reportRequest?.body as FormData
     expect(body.get('feature_id')).toBe(featureId)
     expect(body.get('text')).toBe('Заменили муфту')
+    expect((body.get('photos') as File).name).toBe('phone.heic')
     expect(body.get('external_report_id')).toMatch(/^[0-9a-f-]{36}$/)
     expect(new Headers(reportRequest?.headers).get('X-CSRF-Token')).toBe('csrf-test')
   })

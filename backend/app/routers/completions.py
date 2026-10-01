@@ -7,7 +7,7 @@ from app.capabilities import gis_visible_for_techportal_role
 from app.config import Settings, get_settings
 from app.dependencies import actor_from_session, require_csrf, require_session
 from app.errors import ApiError
-from app.report_photos import MAX_PHOTO_BYTES, validate_report_photo
+from app.report_photos import prepare_report_photos
 from app.schemas import ConnectionCompletionResponse, SessionData
 
 router = APIRouter(prefix='/api/tickets', tags=['ticket-completions'])
@@ -52,12 +52,7 @@ async def complete_connection(
         raise ApiError(503, 'PHOTO_STORAGE_NOT_CONFIGURED', 'Загрузка фотографий для заявок не настроена')
     if feature_id and photos and not completion_service.gis_photos_available:
         raise ApiError(503, 'GIS_PHOTO_STORAGE_NOT_CONFIGURED', 'Для отправки фотографий в GIS требуется настроенное S3-хранилище')
-    payload_photos = []
-    for photo in photos:
-        content_type = photo.content_type or ''
-        content = await photo.read(MAX_PHOTO_BYTES + 1)
-        validate_report_photo(content_type, content)
-        payload_photos.append({'name': photo.filename or 'photo', 'content_type': content_type, 'content': content})
+    payload_photos = await prepare_report_photos(photos)
     _, session = session_pair
     if feature_id and not gis_visible_for_techportal_role(session.user.status, settings.gis_tikets_visible_techportal_roles):
         raise ApiError(403, 'GIS_ACCESS_DENIED', 'Нет доступа к карте GIS')

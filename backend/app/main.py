@@ -109,13 +109,13 @@ async def request_logging(request: Request, call_next):
         request.state.timing_started_at = datetime.now(UTC)
         request.state.timing_started = started
     try:
-        if request.method == 'POST' and request.url.path.endswith(('/connection-completion', '/ticket-completion')):
+        if request.method == 'POST' and (request.url.path.endswith(('/connection-completion', '/ticket-completion')) or request.url.path == '/api/gis/reports'):
             try:
                 content_length = int(request.headers.get('content-length', '0'))
             except ValueError:
-                raise ApiError(422, 'REPORT_SIZE_LIMIT', 'Размер отчёта превышает допустимый лимит')
+                return await api_error_handler(request, ApiError(422, 'REPORT_SIZE_LIMIT', 'Некорректный размер отчёта'))
             if content_length > MAX_CONNECTION_COMPLETION_BODY_BYTES:
-                raise ApiError(422, 'REPORT_SIZE_LIMIT', 'Размер отчёта превышает допустимый лимит')
+                return await api_error_handler(request, ApiError(413, 'REPORT_SIZE_LIMIT', 'Размер отчёта превышает допустимый лимит'))
         with span("http_accept", "operation"):
             response = await call_next(request)
         response.headers["X-Request-ID"] = request_id

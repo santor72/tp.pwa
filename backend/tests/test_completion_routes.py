@@ -204,4 +204,10 @@ def test_connection_completion_accepts_gis_only_photo_with_techportal_text():
     }, files={'photos': ('work.jpg', image.getvalue(), 'image/jpeg')})
 
     assert response.status_code == 200
-    assert completion.begin_args[1]['photos'][0]['content'] == image.getvalue()
+    prepared = completion.begin_args[1]['photos'][0]
+    assert prepared['name'] == 'work.jpg'
+    assert prepared['content_type'] == 'image/jpeg'
+    with Image.open(BytesIO(prepared['content'])) as saved:
+        saved.load()
+        assert saved.format == 'JPEG'
+        assert saved.size == (1, 1)

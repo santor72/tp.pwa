@@ -11,6 +11,7 @@ import {
   useState,
 } from 'react'
 import { paymentCommands } from './paymentCommands'
+import { REPORT_PHOTO_ACCEPT, REPORT_PHOTO_HINT, reportPhotoSelectionError } from './reportPhotos'
 import { ProviderMapCanvas } from './ProviderMapCanvas'
 import type { GisMapCanvasProps, GisMapView, GisPosition } from './GisMapCanvas'
 import { createPortal } from 'react-dom'
@@ -883,6 +884,8 @@ function TicketDetails({
     if (needsComment && !portalText) { setCompletionError('Опишите выполненные работы'); return }
     if (featureId.trim() && !mapText && !photos.length) { setCompletionError('Добавьте текст отчёта GIS или фотографию'); return }
     if (featureId.trim() && photos.length && !gisPhotosAllowed) { setCompletionError('Для отправки фотографий в GIS требуется настроенное S3-хранилище'); return }
+    const photoError = reportPhotoSelectionError(photos)
+    if (photoError) { setCompletionError(photoError); return }
     setSubmitting(true); setCompletionError('')
     try {
       setCompletion(await onCompleteTicket(portalText, mapText, photos, featureId.trim() || undefined, completionIdempotencyKey.current))
@@ -921,7 +924,12 @@ function TicketDetails({
         {editable && isReport && <>
           <Field label={needsComment ? 'Что выполнено' : 'Отчёт для ТехПортала'} required={needsComment}><textarea aria-label={needsComment ? 'Что выполнено' : 'Отчёт для ТехПортала'} value={techportalText} onChange={event => setTechportalText(event.target.value)} rows={needsComment ? 4 : 3} placeholder={needsComment ? 'Опишите выполненные работы' : 'Комментарий о выполненных работах'} /></Field>
           {gisAllowed && <div className="field"><span>Объект GIS — необязательно</span><GisFeaturePicker value={featureId} onChange={setFeatureId} /></div>}
-          {(connectionPhotosAllowed || (featureId && gisPhotosAllowed)) && <Field label={connectionPhotosAllowed ? 'Фотографии' : 'Фотографии для GIS'}><input aria-label="Фотографии выполнения" type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={event => setPhotos(Array.from(event.target.files ?? []))} /></Field>}
+          {(connectionPhotosAllowed || (featureId && gisPhotosAllowed)) && <Field label={connectionPhotosAllowed ? 'Фотографии' : 'Фотографии для GIS'}><input aria-label="Фотографии выполнения" type="file" accept={REPORT_PHOTO_ACCEPT} multiple onChange={event => {
+            const selected = Array.from(event.target.files ?? [])
+            const photoError = reportPhotoSelectionError(selected)
+            setCompletionError(photoError)
+            if (!photoError) setPhotos(selected)
+          }} /><small>{REPORT_PHOTO_HINT}</small></Field>}
           {featureId && <Field label="Отчёт для GIS" required={!gisPhotosAllowed}><textarea aria-label="Отчёт для GIS" value={gisText} onChange={event => setGisText(event.target.value)} rows={3} placeholder="Описание для отчёта GIS" /></Field>}
           {completionError && <ErrorBox text={completionError} />}
         </>}
@@ -1221,9 +1229,8 @@ function GisReportForm({ featureId, csrfToken }: { featureId: string; csrfToken:
   const ids = useRef<{ externalReportId: string; completionId: string } | null>(null)
 
   const selectPhotos = (selected: File[]) => {
-    if (selected.length > 5) { setError('В одном отчёте можно загрузить до 5 фотографий'); return }
-    if (selected.some(photo => !['image/jpeg', 'image/png', 'image/webp'].includes(photo.type))) { setError('Допустимы фотографии JPEG, PNG или WebP'); return }
-    if (selected.some(photo => photo.size > 10 * 1024 * 1024)) { setError('Размер одной фотографии — не более 10 МБ'); return }
+    const photoError = reportPhotoSelectionError(selected)
+    if (photoError) { setError(photoError); return }
     setError(''); setPhotos(selected)
   }
   async function submit(event: FormEvent) {
@@ -1244,7 +1251,7 @@ function GisReportForm({ featureId, csrfToken }: { featureId: string; csrfToken:
   return <form className="gis-report-form" onSubmit={submit}>
     <h3>Новый отчёт</h3>
     <Field label="Описание работ"><textarea value={text} onChange={event => { setText(event.target.value); ids.current = null }} maxLength={10_000} rows={4} placeholder="Что выполнено" /></Field>
-    <Field label="Фотографии"><input aria-label="Фотографии" type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={event => { selectPhotos(Array.from(event.target.files ?? [])); ids.current = null }} /></Field>
+    <Field label="Фотографии"><input aria-label="Фотографии" type="file" accept={REPORT_PHOTO_ACCEPT} multiple onChange={event => { selectPhotos(Array.from(event.target.files ?? [])); ids.current = null }} /><small>{REPORT_PHOTO_HINT}</small></Field>
     {photos.length > 0 && <p className="gis-report-photos">Выбрано фотографий: {photos.length}</p>}
     {error && <ErrorBox text={error} />}
     <button className="primary-button" disabled={sending}>{sending ? 'Отправляем…' : 'Отправить отчёт'}</button>

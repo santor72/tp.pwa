@@ -1,5 +1,5 @@
 from datetime import UTC, datetime
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse, Response
 from app.dependencies import require_gis_csrf, require_gis_data_session
 from app.config import Settings, get_settings
 from app.errors import ApiError
-from app.report_photos import MAX_PHOTO_BYTES, validate_report_photo
+from app.report_photos import prepare_report_photos
 from app.schemas import SessionData
 
 router = APIRouter(prefix='/api/gis', tags=['gis'])
@@ -101,11 +101,8 @@ async def create_report(
         raise ApiError(422, 'GIS_REPORT_PHOTOS_LIMIT', 'В одном отчёте можно загрузить до 5 фотографий')
     if not report_text and not photos:
         raise ApiError(422, 'GIS_REPORT_EMPTY', 'Добавьте текст или фотографию')
-    payload_photos: list[tuple[str, bytes, str]] = []
-    for photo in photos:
-        content = await photo.read(MAX_PHOTO_BYTES + 1)
-        validate_report_photo(photo.content_type or '', content, code_prefix='GIS_REPORT')
-        payload_photos.append((photo.filename or f'{uuid4()}.jpg', content, photo.content_type))
+    prepared_photos = await prepare_report_photos(photos, code_prefix='GIS_REPORT')
+    payload_photos = [(photo['name'], photo['content'], photo['content_type']) for photo in prepared_photos]
     session = session_pair[1]
     technician_name = (session.user.first_name or session.user.email).strip() or str(session.user.id)
     technician_last_name = (session.user.last_name or '').strip()
