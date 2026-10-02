@@ -9,6 +9,10 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
+      workbox: {
+        // The admin UI is served by a separate container on the same origin.
+        navigateFallbackDenylist: [/^\/admin(?:\/|\?|$)/],
+      },
       manifest: {
         name: 'ТехПортал',
         short_name: 'ТехПортал',
