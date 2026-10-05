@@ -55,7 +55,7 @@ async def test_gis_client_sends_map_report_as_server_authenticated_multipart():
         return httpx.Response(201, json={'id': 'report', 'external_report_id': 'external', 'repeated': False, 'retention_until': None})
 
     client = GisClient(configured(), httpx.AsyncClient(transport=httpx.MockTransport(upstream)))
-    metadata = {'external_report_id': 'external', 'ticket_id': 1, 'text': 'Готово'}
+    metadata = {'external_report_id': 'external', 'text': 'Готово', 'closureFull': True, 'fromScratch': True}
     result = await client.create_report(metadata, [('work.jpg', b'photo', 'image/jpeg')])
 
     assert result['id'] == 'report'
@@ -83,3 +83,15 @@ async def test_gis_client_returns_none_for_missing_external_report_and_receipt_w
         'https://gis.test/integration/v1/reports/by-external-id/missing',
         'https://gis.test/integration/v1/reports/by-external-id/known',
     ]
+
+
+@pytest.mark.asyncio
+async def test_mark_point_only_retains_upstream_status_and_code():
+    async def upstream(request):
+        return httpx.Response(400, json={'code': 'MARK_POINT_ONLY', 'error': 'Отметки только для точек'})
+
+    client = GisClient(configured(), httpx.AsyncClient(transport=httpx.MockTransport(upstream)))
+    with pytest.raises(ApiError) as error:
+        await client.create_report({'closureFull': True, 'fromScratch': True}, [])
+    assert error.value.status_code == 400
+    assert error.value.code == 'MARK_POINT_ONLY'

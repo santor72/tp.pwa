@@ -13,6 +13,7 @@ from app.techportal_photo_delivery import PhotoSaveResult, TechPortalPhotoDelive
 class FakeRepository:
     def __init__(self):
         self.rows = {}
+        self.attempts = []
 
     async def create_or_get(self, **values):
         row = SimpleNamespace(id=uuid4(), created_at=datetime.now(UTC), updated_at=datetime.now(UTC),
@@ -20,6 +21,9 @@ class FakeRepository:
                               attempt_count=0, next_attempt_at=None, **values)
         self.rows[row.id] = row
         return row, True
+
+    async def add_attempt(self, operation_id, **values):
+        self.attempts.append((operation_id, values))
 
     async def get(self, operation_id):
         return self.rows.get(operation_id)
@@ -47,9 +51,11 @@ class FakeTickets:
 
     async def mark_connection_completed(self, user_id, day, ticket_id, comment):
         self.marked.append((user_id, day, ticket_id, comment))
+        return SimpleNamespace(model_dump=lambda **kwargs: {'success': True})
 
     async def mark_ticket_completed(self, user_id, day, ticket_id, comment, ticket_kind):
         self.marked.append((user_id, day, ticket_id, comment))
+        return SimpleNamespace(model_dump=lambda **kwargs: {'success': True})
 
     async def connection_completion_recorded(self, user_id, ticket_id, comment):
         return self.recorded
@@ -94,7 +100,7 @@ class FakeGis:
 
     async def feature(self, feature_id):
         self.feature_ids.append(feature_id)
-        return {'id': feature_id, 'title': 'Муфта'}
+        return {'id': feature_id, 'title': 'Муфта', 'geometry': {'type': 'Point'}}
 
     async def create_report(self, metadata, photos):
         self.reports.append((metadata, photos))
@@ -444,3 +450,70 @@ async def test_reconciliation_without_matching_techportal_comment_requires_revie
 
     assert operation.completion_status == 'needs_review'
     assert operation.last_error_code == 'TECHPORTAL_COMPLETION_UNCONFIRMED'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('ticket_kind', ['connection', 'repair'])
+async def test_ticket_marks_are_persisted_and_sent_on_retry(ticket_kind):
+    gis = FakeGis(fail=True)
+    subject = service(gis=gis)
+    actor = Actor(user_id=uuid4(), techportal_user_id='17', channel='pwa')
+    operation = await subject.begin(actor, ticket_id=12, ticket_kind=ticket_kind, day='today', idempotency_key=uuid4(),
+        techportal_text='Выполнено', gis_text='Сварили', feature_id=uuid4(), technician_name='Иван', photos=[],
+        closure_full=True, from_scratch=True)
+    assert operation.closure_full is True and operation.from_scratch is True
+    await subject.mark_techportal(operation.id)
+    assert operation.gis_status == 'retry_wait'
+    gis.fail = False
+    await subject.send_gis(operation.id)
+    assert operation.gis_status == 'delivered'
+    for metadata, _ in gis.reports:
+        assert metadata['closureFull'] is True and metadata['fromScratch'] is True
+    assert gis.reports[0][0] == gis.reports[1][0]
+
+
+@pytest.mark.asyncio
+async def test_ticket_marks_reject_nonpoint_and_missing_feature_before_completion():
+    gis = FakeGis()
+    subject = service(gis=gis)
+    actor = Actor(user_id=uuid4(), techportal_user_id='17', channel='pwa')
+    async def line(feature_id):
+        return {'id': feature_id, 'geometry': {'type': 'LineString'}}
+    gis.feature = line
+    for feature_id in [None, uuid4()]:
+        with pytest.raises(ApiError) as error:
+            await subject.begin(actor, ticket_id=12, day='today', idempotency_key=uuid4(),
+                techportal_text='Выполнено', gis_text='Работы', feature_id=feature_id, technician_name='Иван', photos=[],
+                closure_full=True)
+        assert error.value.code == 'MARK_POINT_ONLY'
+        assert error.value.status_code == 400
+    assert subject._tickets.marked == []
+    assert subject._repository.rows == {}
+
+
+@pytest.mark.asyncio
+async def test_ticket_mark_change_conflicts_with_existing_completion_key():
+    subject = service()
+    actor = Actor(user_id=uuid4(), techportal_user_id='17', channel='pwa')
+    args = dict(ticket_id=12, day='today', idempotency_key=uuid4(), techportal_text='Выполнено',
+        gis_text='Работы', feature_id=uuid4(), technician_name='Иван', photos=[], closure_full=True)
+    operation = await subject.begin(actor, **args)
+    async def existing(**values):
+        return operation, False
+    subject._repository.create_or_get = existing
+    assert await subject.begin(actor, **args) is operation
+    args['from_scratch'] = True
+    with pytest.raises(ApiError) as error:
+        await subject.begin(actor, **args)
+    assert error.value.code == 'COMPLETION_IDEMPOTENCY_CONFLICT'
+
+
+@pytest.mark.asyncio
+async def test_ticket_marks_still_require_gis_text_or_photo():
+    subject = service()
+    actor = Actor(user_id=uuid4(), techportal_user_id='17', channel='pwa')
+    with pytest.raises(ApiError) as error:
+        await subject.begin(actor, ticket_id=12, day='today', idempotency_key=uuid4(), techportal_text='Выполнено',
+            gis_text='', feature_id=uuid4(), technician_name='Иван', photos=[], closure_full=True, from_scratch=True)
+    assert error.value.code == 'GIS_REPORT_REQUIRED'
+    assert subject._repository.rows == {}

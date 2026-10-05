@@ -31,6 +31,7 @@ import {
   TicketFilters,
   TicketFilterSelection,
   GisReportReceipt,
+  GisReportFeature,
   ConnectionCompletion,
 } from './api'
 
@@ -657,7 +658,7 @@ function CommentValue({ value }: { value: string }) {
   return <span>{value || 'Пустой комментарий'}</span>
 }
 
-function GisFeaturePicker({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+function GisFeaturePicker({ value, onChange }: { value: string; onChange: (value: string, details?: GisFeatureDetails) => void }) {
   const [open, setOpen] = useState(false)
   const [maps, setMaps] = useState<GisMap[]>([])
   const [mapId, setMapId] = useState('')
@@ -816,7 +817,7 @@ function GisFeaturePicker({ value, onChange }: { value: string; onChange: (value
           {detailsLoading && <p className="gis-feature-loading">Загружаем карточку объекта…</p>}
           {detailsError && <ErrorBox text={detailsError} />}
           {details?.description && <p className="gis-feature-description">{plainGisDescription(details.description)}</p>}
-          <div className="gis-picker-actions"><button type="button" className="outline-button" onClick={() => setSelected(null)}>Назад к карте</button><button type="button" className="primary-button" disabled={detailsLoading || !details || Boolean(detailsError)} onClick={() => { onChange(selected.id); closePicker() }}>Выбрать этот объект</button></div>
+          <div className="gis-picker-actions"><button type="button" className="outline-button" onClick={() => setSelected(null)}>Назад к карте</button><button type="button" className="primary-button" disabled={detailsLoading || !details || Boolean(detailsError)} onClick={() => { onChange(selected.id, details ?? undefined); closePicker() }}>Выбрать этот объект</button></div>
         </section>}
       </aside>
     </div>, document.body)}
@@ -843,7 +844,7 @@ function TicketDetails({
   onBack: () => void
   onToggle: (comment?: string) => void
   onDial: (phone: string) => void
-  onCompleteTicket: (techportalText: string, gisText: string, photos: File[], featureId: string | undefined, idempotencyKey: string) => Promise<ConnectionCompletion>
+  onCompleteTicket: (techportalText: string, gisText: string, photos: File[], featureId: string | undefined, idempotencyKey: string, marks: { closureFull: boolean; fromScratch: boolean }) => Promise<ConnectionCompletion>
   gisAllowed: boolean
   connectionPhotosAllowed: boolean
   gisPhotosAllowed: boolean
@@ -852,6 +853,9 @@ function TicketDetails({
   const [gisText, setGisText] = useState('')
   const [photos, setPhotos] = useState<File[]>([])
   const [featureId, setFeatureId] = useState('')
+  const [featureDetails, setFeatureDetails] = useState<GisFeatureDetails | null>(null)
+  const [closureFull, setClosureFull] = useState(false)
+  const [fromScratch, setFromScratch] = useState(false)
   const [completion, setCompletion] = useState<ConnectionCompletion | null>(null)
   const [completionError, setCompletionError] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -888,7 +892,7 @@ function TicketDetails({
     if (photoError) { setCompletionError(photoError); return }
     setSubmitting(true); setCompletionError('')
     try {
-      setCompletion(await onCompleteTicket(portalText, mapText, photos, featureId.trim() || undefined, completionIdempotencyKey.current))
+      setCompletion(await onCompleteTicket(portalText, mapText, photos, featureId.trim() || undefined, completionIdempotencyKey.current, { closureFull: !!featureId && closureFull, fromScratch: !!featureId && fromScratch }))
     } catch (cause) {
       setCompletionError(errorMessage(cause))
     } finally {
@@ -923,7 +927,10 @@ function TicketDetails({
         </div>
         {editable && isReport && <>
           <Field label={needsComment ? 'Что выполнено' : 'Отчёт для ТехПортала'} required={needsComment}><textarea aria-label={needsComment ? 'Что выполнено' : 'Отчёт для ТехПортала'} value={techportalText} onChange={event => setTechportalText(event.target.value)} rows={needsComment ? 4 : 3} placeholder={needsComment ? 'Опишите выполненные работы' : 'Комментарий о выполненных работах'} /></Field>
-          {gisAllowed && <div className="field"><span>Объект GIS — необязательно</span><GisFeaturePicker value={featureId} onChange={setFeatureId} /></div>}
+          {gisAllowed && <div className="field"><span>Объект GIS — необязательно</span><GisFeaturePicker value={featureId} onChange={(id, details) => {
+            setFeatureId(id); setFeatureDetails(details ?? null); setClosureFull(false); setFromScratch(false)
+            completionIdempotencyKey.current = createUuid()
+          }} /></div>}
           {(connectionPhotosAllowed || (featureId && gisPhotosAllowed)) && <Field label={connectionPhotosAllowed ? 'Фотографии' : 'Фотографии для GIS'}><input aria-label="Фотографии выполнения" type="file" accept={REPORT_PHOTO_ACCEPT} multiple onChange={event => {
             const selected = Array.from(event.target.files ?? [])
             const photoError = reportPhotoSelectionError(selected)
@@ -931,6 +938,9 @@ function TicketDetails({
             if (!photoError) setPhotos(selected)
           }} /><small>{REPORT_PHOTO_HINT}</small></Field>}
           {featureId && <Field label="Отчёт для GIS" required={!gisPhotosAllowed}><textarea aria-label="Отчёт для GIS" value={gisText} onChange={event => setGisText(event.target.value)} rows={3} placeholder="Описание для отчёта GIS" /></Field>}
+          {featureId && featureDetails?.geometry.type === 'Point' && <GisReportMarks closureFull={closureFull} fromScratch={fromScratch} disabled={submitting || busy}
+            onClosureFullChange={value => { setClosureFull(value); completionIdempotencyKey.current = createUuid() }}
+            onFromScratchChange={value => { setFromScratch(value); completionIdempotencyKey.current = createUuid() }} />}
           {completionError && <ErrorBox text={completionError} />}
         </>}
         {completionNotice && <div className={completion?.completion_status === 'completed' ? 'success-box' : 'error-box'}>{completionNotice}</div>}
@@ -1074,8 +1084,8 @@ function Tickets({ day, session }: { day: TicketDay; session: Session }) {
           onBack={() => { setSelectedId(null); setError('') }}
           onToggle={comment => toggle(selected, comment)}
           onDial={phone => dial(selected, phone)}
-          onCompleteTicket={async (techportalText, gisText, photos, featureId, idempotencyKey) => {
-            const completion = await api.completeConnection(selected.id, { day, ticketKind: selected.kind, idempotencyKey, techportalText, gisText, photos, featureId }, session.csrf_token)
+          onCompleteTicket={async (techportalText, gisText, photos, featureId, idempotencyKey, marks) => {
+            const completion = await api.completeConnection(selected.id, { day, ticketKind: selected.kind, idempotencyKey, techportalText, gisText, photos, featureId, ...marks }, session.csrf_token)
             if (completion.completion_status === 'completed') {
               setTickets(current => current.map(item => item.id === selected.id ? { ...item, completed: true } : item))
             }
@@ -1220,13 +1230,28 @@ function createUuid(): string {
   })
 }
 
-function GisReportForm({ featureId, csrfToken }: { featureId: string; csrfToken: string }) {
+function GisReportMarks({ closureFull, fromScratch, disabled, onClosureFullChange, onFromScratchChange }: {
+  closureFull: boolean; fromScratch: boolean; disabled: boolean
+  onClosureFullChange: (value: boolean) => void; onFromScratchChange: (value: boolean) => void
+}) {
+  return <fieldset className="gis-report-marks" disabled={disabled}>
+    <legend>Отметки о работе</legend>
+    <label><input type="checkbox" checked={fromScratch} onChange={event => onFromScratchChange(event.target.checked)} />С нуля</label>
+    <small>Синий значок станет фиолетовым. Остальные цвета сохранятся.</small>
+    <label><input type="checkbox" checked={closureFull} onChange={event => onClosureFullChange(event.target.checked)} />Муфта забита</label>
+    <small>Точка станет красной. Снять отметку может только проектировщик в GIS.</small>
+  </fieldset>
+}
+
+function GisReportForm({ featureId, point, csrfToken, onSaved }: { featureId: string; point: boolean; csrfToken: string; onSaved: (featureId: string, feature: GisReportFeature) => void }) {
   const [text, setText] = useState('')
   const [photos, setPhotos] = useState<File[]>([])
   const [error, setError] = useState('')
   const [sending, setSending] = useState(false)
   const [receipt, setReceipt] = useState<GisReportReceipt | null>(null)
-  const ids = useRef<{ externalReportId: string; completionId: string } | null>(null)
+  const [closureFull, setClosureFull] = useState(false)
+  const [fromScratch, setFromScratch] = useState(false)
+  const ids = useRef<{ externalReportId: string; completionId: string; occurredAt: string } | null>(null)
 
   const selectPhotos = (selected: File[]) => {
     const photoError = reportPhotoSelectionError(selected)
@@ -1235,14 +1260,19 @@ function GisReportForm({ featureId, csrfToken }: { featureId: string; csrfToken:
   }
   async function submit(event: FormEvent) {
     event.preventDefault()
+    if (sending) return
     const value = text.trim()
     if (!value && !photos.length) { setError('Добавьте текст или фотографию'); return }
-    if (!ids.current) ids.current = { externalReportId: createUuid(), completionId: createUuid() }
+    if (!ids.current) ids.current = { externalReportId: createUuid(), completionId: createUuid(), occurredAt: new Date().toISOString() }
     setSending(true); setError('')
     try {
-      setReceipt(await api.createGisReport({ featureId, externalReportId: ids.current.externalReportId, completionId: ids.current.completionId, text: value, photos }, csrfToken))
+      const result = await api.createGisReport({ featureId, ...ids.current, text: value, photos, closureFull: point && closureFull, fromScratch: point && fromScratch }, csrfToken)
+      setReceipt(result)
+      if (result.feature) onSaved(featureId, result.feature)
     } catch (cause) {
-      setError(errorMessage(cause))
+      setError(cause instanceof ApiError && cause.code === 'MARK_POINT_ONLY'
+        ? 'Отметки «С нуля» и «Муфта забита» доступны только для точек. Выберите точку на карте.'
+        : errorMessage(cause))
     } finally {
       setSending(false)
     }
@@ -1250,15 +1280,18 @@ function GisReportForm({ featureId, csrfToken }: { featureId: string; csrfToken:
   if (receipt) return <section className="gis-report-form"><h3>Отчёт отправлен</h3><p>GIS сохранила отчёт по выбранному объекту.</p></section>
   return <form className="gis-report-form" onSubmit={submit}>
     <h3>Новый отчёт</h3>
-    <Field label="Описание работ"><textarea value={text} onChange={event => { setText(event.target.value); ids.current = null }} maxLength={10_000} rows={4} placeholder="Что выполнено" /></Field>
-    <Field label="Фотографии"><input aria-label="Фотографии" type="file" accept={REPORT_PHOTO_ACCEPT} multiple onChange={event => { selectPhotos(Array.from(event.target.files ?? [])); ids.current = null }} /><small>{REPORT_PHOTO_HINT}</small></Field>
+    <Field label="Описание работ"><textarea value={text} disabled={sending} onChange={event => { setText(event.target.value); ids.current = null }} maxLength={10_000} rows={4} placeholder="Что выполнено" /></Field>
+    {point && <GisReportMarks closureFull={closureFull} fromScratch={fromScratch} disabled={sending}
+      onClosureFullChange={value => { setClosureFull(value); ids.current = null }}
+      onFromScratchChange={value => { setFromScratch(value); ids.current = null }} />}
+    <Field label="Фотографии"><input aria-label="Фотографии" type="file" accept={REPORT_PHOTO_ACCEPT} multiple disabled={sending} onChange={event => { selectPhotos(Array.from(event.target.files ?? [])); ids.current = null }} /><small>{REPORT_PHOTO_HINT}</small></Field>
     {photos.length > 0 && <p className="gis-report-photos">Выбрано фотографий: {photos.length}</p>}
     {error && <ErrorBox text={error} />}
     <button className="primary-button" disabled={sending}>{sending ? 'Отправляем…' : 'Отправить отчёт'}</button>
   </form>
 }
 
-function GisFeatureCard({ feature, details, loading, error, csrfToken, onClose }: { feature: GisFeature | null; details: GisFeatureDetails | null; loading: boolean; error: string; csrfToken: string; onClose: () => void }) {
+function GisFeatureCard({ feature, details, loading, error, csrfToken, onSaved, onClose }: { feature: GisFeature | null; details: GisFeatureDetails | null; loading: boolean; error: string; csrfToken: string; onSaved: (featureId: string, feature: GisReportFeature) => void; onClose: () => void }) {
   if (!feature) return null
   const detailRows = details ? [
     [details.geometry.type === 'Point' ? 'Координаты' : 'Длина', objectGeometryLabel(details)],
@@ -1278,7 +1311,8 @@ function GisFeatureCard({ feature, details, loading, error, csrfToken, onClose }
           {detailRows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{String(value)}</dd></div>)}
         </dl>}
         {description && <section className="gis-feature-description"><h3>Описание</h3><p>{description}</p></section>}
-        <GisReportForm featureId={details.id} csrfToken={csrfToken} />
+        {details.closureFull && <p className="gis-closure-full">Муфта забита. Снять отметку может только проектировщик в GIS.</p>}
+        <GisReportForm featureId={details.id} point={details.geometry.type === 'Point'} csrfToken={csrfToken} onSaved={onSaved} />
       </>}
     </aside>
   </div>, document.body)
@@ -1450,6 +1484,18 @@ function MapScreen({ session }: { session: Session }) {
     return () => controller.abort()
   }, [selected?.id])
   const openFeature = useCallback((feature: GisFeature) => setSelected(feature), [])
+  const reportSaved = (featureId: string, state: GisReportFeature) => {
+    const update = (feature: GisFeature): GisFeature => {
+      if (feature.id !== featureId) return feature
+      const iconUrl = feature.properties.iconUrl
+      return { ...feature, properties: { ...feature.properties, ...state,
+        iconUrl: iconUrl?.startsWith('/api/gis/assets/') ? `${iconUrl.split('?')[0]}?color=${state.iconColor.replace('#', '')}` : iconUrl } }
+    }
+    setData(previous => previous ? { ...previous, features: previous.features.map(update) } : previous)
+    setSelected(previous => previous ? update(previous) : previous)
+    setSelectedDetails(previous => previous?.id === featureId
+      ? { ...previous, closureFull: state.closureFull, style: { ...previous.style, iconColor: state.iconColor } } : previous)
+  }
   const closeFeature = () => { setSelected(null); setSelectedDetails(null); setDetailsError('') }
   return <section className="map-screen">
     <div className="step-heading"><div className="gis-map-heading-row"><h1>Карта сети</h1>{layers.length > 0 && <details className="gis-layers-panel"><summary>Слои <span>{selectedLayers.length} из {layers.length}{lineOptionsAvailable ? ` · ${Number(lineLayers.network) + Number(lineLayers.poles)} линий` : ''}</span></summary><div className="gis-layers">{layers.map(layer => <label key={layer.id}><input type="checkbox" checked={selectedLayers.includes(layer.id)} onChange={() => toggleLayer(layer.id)} />{layer.name}</label>)}{lineOptionsAvailable && <><label><input type="checkbox" checked={lineLayers.network} onChange={() => setLineLayers(value => ({ ...value, network: !value.network }))} />Сеть (линии)</label><label><input type="checkbox" checked={lineLayers.poles} onChange={() => setLineLayers(value => ({ ...value, poles: !value.poles }))} />Линии столбов</label></>}</div><div className="gis-layer-defaults"><span>{defaultsSaved ? 'Настройка по умолчанию сохранена' : 'Используется исходный набор слоёв'}</span><button type="button" className="outline-button" onClick={saveDefaultLayers}>Сохранить как по умолчанию</button>{defaultsSaved && <button type="button" className="outline-button" onClick={resetDefaultLayers}>Сбросить</button>}</div></details>}</div><p>{locationNotice || 'Определяем местоположение…'}</p></div>
@@ -1459,7 +1505,7 @@ function MapScreen({ session }: { session: Session }) {
     {maps.length > 1 && <label className="field"><span>Карта</span><select value={current?.id ?? ''} onChange={event => setCurrent(maps.find(map => map.id === event.target.value) ?? null)}>{maps.map(map => <option key={map.id} value={map.id}>{map.name}</option>)}</select></label>}
     {mapView && <MapCanvas mapId={current?.id} data={data} position={position} view={mapView} lineVisibility={lineLayers} onLineVisibilityChange={setLineLayers} onLineOptionsChange={setLineOptionsAvailable} onViewChange={handleViewChange} onBoundsChange={updateViewportBounds} onInteractionChange={setMapInteracting} onSelect={openFeature} onLocate={locate} locating={locating} />}
     {data?.truncated && <p className="gis-map-notice">Показана часть объектов. Увеличьте масштаб для подробностей.</p>}
-    <GisFeatureCard key={selected?.id} feature={selected} details={selectedDetails} loading={detailsLoading} error={detailsError} csrfToken={session.csrf_token} onClose={closeFeature} />
+    <GisFeatureCard key={selected?.id} feature={selected} details={selectedDetails} loading={detailsLoading} error={detailsError} csrfToken={session.csrf_token} onSaved={reportSaved} onClose={closeFeature} />
   </section>
 }
 

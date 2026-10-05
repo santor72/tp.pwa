@@ -87,10 +87,11 @@ export type MessengerLinkCreate = {
 }
 export type GisMapProvider = 'yandex' | 'yandex-v3'
 export type GisBasemapConfig = { provider: GisMapProvider; scriptUrl: string | null; pointIconSize?: number; pointCircleSize?: number; pointFixedSizeMaxZoom?: number; iconFixed?: boolean; mobilemap?: boolean }
-export type GisReportReceipt = { id: string; external_report_id: string; repeated: boolean; retention_until: string | null }
-export type GisMapReport = { featureId: string; externalReportId: string; completionId: string; text: string; photos: File[] }
+export type GisReportFeature = { closureFull: boolean; iconColor: string }
+export type GisReportReceipt = { id: string; external_report_id: string; repeated: boolean; retention_until?: string | null; feature?: GisReportFeature }
+export type GisMapReport = { featureId: string; externalReportId: string; completionId: string; text: string; photos: File[]; closureFull?: boolean; fromScratch?: boolean; occurredAt?: string }
 export type ConnectionCompletion = { id: string; ticket_id: number; completion_status: string; gis_status: string; gis_report_id: string | null; error_code: string | null; error_message: string | null; created_at: string; updated_at: string }
-export type ConnectionCompletionPayload = { day: TicketDay; ticketKind?: Ticket['kind']; idempotencyKey: string; techportalText: string; gisText: string; featureId?: string; photos: File[] }
+export type ConnectionCompletionPayload = { day: TicketDay; ticketKind?: Ticket['kind']; idempotencyKey: string; techportalText: string; gisText: string; featureId?: string; photos: File[]; closureFull?: boolean; fromScratch?: boolean }
 
 export const api = {
   session: () => request<Session>('/api/auth/session'),
@@ -158,6 +159,9 @@ export const api = {
     body.set('external_report_id', report.externalReportId)
     body.set('completion_id', report.completionId)
     body.set('text', report.text)
+    if (report.closureFull) body.set('closureFull', 'true')
+    if (report.fromScratch) body.set('fromScratch', 'true')
+    if (report.occurredAt) body.set('occurred_at', report.occurredAt)
     report.photos.forEach(photo => body.append('photos', photo, photo.name))
     return request<GisReportReceipt>('/api/gis/reports', { method: 'POST', headers: { 'X-CSRF-Token': csrfToken }, body })
   },
@@ -168,7 +172,11 @@ export const api = {
     body.set('idempotency_key', payload.idempotencyKey)
     body.set('techportal_text', payload.techportalText)
     body.set('gis_text', payload.gisText)
-    if (payload.featureId) body.set('feature_id', payload.featureId)
+    if (payload.featureId) {
+      body.set('feature_id', payload.featureId)
+      if (payload.closureFull) body.set('closureFull', 'true')
+      if (payload.fromScratch) body.set('fromScratch', 'true')
+    }
     payload.photos.forEach(photo => body.append('photos', photo, photo.name))
     const endpoint = payload.ticketKind === 'repair' ? 'ticket-completion' : 'connection-completion'
     return request<ConnectionCompletion>(`/api/tickets/${ticketId}/${endpoint}`, { method: 'POST', headers: { 'X-CSRF-Token': csrfToken }, body })

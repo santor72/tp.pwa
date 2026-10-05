@@ -34,11 +34,15 @@ async def complete_connection(
     gis_text: str = Form(default='', max_length=10_000),
     feature_id: UUID | None = Form(default=None),
     photos: list[UploadFile] = File(default=[]),
+    closureFull: bool = Form(default=False),
+    fromScratch: bool = Form(default=False),
     session_pair: tuple[str, SessionData] = Depends(require_csrf),
     settings: Settings = Depends(get_settings),
 ):
     techportal_report_text = techportal_text.strip()
     gis_report_text = gis_text.strip()
+    if (closureFull or fromScratch) and not feature_id:
+        raise ApiError(400, 'MARK_POINT_ONLY', 'Для отметок выберите точку GIS')
     if day not in {'today', 'tomorrow'}:
         raise ApiError(422, 'VALIDATION_ERROR', 'Укажите день заявки')
     if len(photos) > 5:
@@ -63,7 +67,7 @@ async def complete_connection(
         actor, ticket_id=ticket_id, ticket_kind=ticket_kind, day=day, idempotency_key=idempotency_key,
         techportal_text=techportal_report_text, gis_text=gis_report_text, feature_id=feature_id,
         photos=payload_photos, technician_name=technician_name, technician_last_name=technician_last_name,
-        upstream_cookies=session.upstream_cookies,
+        upstream_cookies=session.upstream_cookies, closure_full=closureFull, from_scratch=fromScratch,
     )
     operation = await request.app.state.connection_completion_service.mark_techportal(operation.id)
     return response(operation)

@@ -175,7 +175,8 @@ GET /integration/v1/features/{feature_id}
   description,
   geometry,
   style,
-  version
+  version,
+  closureFull // boolean: муфта отмечена как забитая
 }
 ```
 
@@ -238,3 +239,30 @@ GIS возвращает ошибки в формате:
 - [Реализация GIS API](../tochka-gis/current/integration-routes.ts).
 - [OpenAPI GIS](../tochka-gis/current/integration-openapi.ts).
 - [Настройки интеграции GIS](../tochka-gis/current/lib/integration-config.ts).
+
+
+## Отметки муфты в ручном отчёте (обновление 05.10.2026)
+
+`POST /integration/v1/reports` принимает в JSON-поле `metadata` необязательные
+булевы `closureFull` («Муфта забита») и `fromScratch` («С нуля»).
+Они доступны только для точек; GIS возвращает `400 MARK_POINT_ONLY` для других геометрий.
+«С нуля» переводит синий значок в фиолетовый, «Муфта забита» — в красный;
+при обеих отметках приоритет у красного. Снять заполнение может только проектировщик в GIS.
+
+Ответ POST содержит `feature: { closureFull: boolean, iconColor: string }`.
+PWA применяет эти значения к карточке и загруженной точке карты, включая цвет PNG-значка.
+`GET /integration/v1/features/{id}` также возвращает `closureFull`.
+
+PWA отправляет ручной отчёт без `ticket_id` и `subscriber`; сервер задаёт автора из сессии.
+Выбранные отметки передаются через `/api/gis/reports` как поля формы и далее в `metadata`.
+Текст или фотография обязательны независимо от отметок.
+Время `occurred_at` и внешний ID сохраняются между повторными попытками неизменённого отчёта.
+
+
+В отчёте выполнения заявки (подключение или ремонт) те же отметки появляются
+после подтверждения точки GIS. Смена или удаление объекта сбрасывает отметки.
+Поля сохраняются в `connection_completion_operations.closure_full` и `from_scratch`
+и отправляются worker-ом вместе с `metadata`, включая повторные попытки.
+Перед отметкой выполнения backend проверяет, что выбранный объект — точка;
+при другой геометрии возвращает `400 MARK_POINT_ONLY`.
+Для обновления backend требуется миграция `20261005_01`.

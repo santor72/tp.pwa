@@ -64,12 +64,14 @@ def test_connection_completion_requires_csrf_and_passes_server_context():
     assert values == {
         'ticket_id': 32412, 'ticket_kind': 'connection', 'day': 'today', 'idempotency_key': key, 'techportal_text': 'Подключили', 'gis_text': '',
         'feature_id': None, 'photos': [], 'technician_name': 'Иван', 'technician_last_name': 'Иванов',
-        'upstream_cookies': {'tp-session': 'employee'},
+        'upstream_cookies': {'tp-session': 'employee'}, 'closure_full': False, 'from_scratch': False,
     }
 
 
 def test_repair_completion_requires_text_and_passes_ticket_kind():
     app = FastAPI()
+    from app.config import Settings, get_settings
+    app.dependency_overrides[get_settings] = lambda: Settings(gis_tikets_visible_techportal_roles='active')
     completion = FakeCompletionService()
     app.state.connection_completion_service = completion
     app.add_exception_handler(ApiError, api_error)
@@ -94,10 +96,13 @@ def test_repair_completion_requires_text_and_passes_ticket_kind():
 
     complete = client.post('/api/tickets/32412/ticket-completion', data={
         'day': 'today', 'ticket_kind': 'repair', 'idempotency_key': str(uuid4()),
-        'techportal_text': 'Заменили кабель',
+        'techportal_text': 'Заменили кабель', 'gis_text': 'Сварили',
+        'feature_id': str(uuid4()), 'closureFull': 'true', 'fromScratch': 'true',
     })
     assert complete.status_code == 200
     assert completion.begin_args[1]['ticket_kind'] == 'repair'
+    assert completion.begin_args[1]['closure_full'] is True
+    assert completion.begin_args[1]['from_scratch'] is True
     assert completion.begin_args[1]['techportal_text'] == 'Заменили кабель'
 
 

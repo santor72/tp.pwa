@@ -278,6 +278,8 @@ class ConnectionCompletionOperation(Base):
     external_report_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), unique=True)
     techportal_text: Mapped[str] = mapped_column(Text, nullable=False, default='')
     gis_text: Mapped[str] = mapped_column(Text, nullable=False, default='')
+    closure_full: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default='false')
+    from_scratch: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default='false')
     subscriber: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     subscriber_login: Mapped[str | None] = mapped_column(String(255))
     subscriber_address: Mapped[str | None] = mapped_column(Text)

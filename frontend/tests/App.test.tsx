@@ -78,9 +78,11 @@ beforeEach(() => {
     private handlers: Record<string, (event: { get: (name: string) => string }) => void> = {}
     private markers = new globalThis.Map<string, HTMLButtonElement>()
     objects = { events: { add: (name: string, handler: (event: { get: (name: string) => string }) => void) => { this.handlers[name] = handler } } }
-    add(feature: { id: string }) {
+    add(feature: { id: string; options?: { iconColor?: string; iconImageHref?: string } }) {
       const marker = document.createElement('button')
       marker.className = 'ymaps-feature'
+      marker.dataset.color = feature.options?.iconColor ?? ''
+      marker.dataset.icon = feature.options?.iconImageHref ?? ''
       marker.onclick = () => this.handlers.click?.({ get: () => feature.id })
       this.markers.set(feature.id, marker); container?.append(marker)
     }
@@ -384,6 +386,91 @@ describe('Платёжный терминал', () => {
 })
 
 describe('Карта сети', () => {
+  async function openMarkedReport({ kind = 'Point', closureFull = false, respond = (_init: RequestInit | undefined) => json({ id: 'report', repeated: false, feature: { closureFull: true, iconColor: '#ff5252' } }) } = {}) {
+    const mapId = '11111111-1111-4111-8111-111111111111'
+    const layerId = '22222222-2222-4222-8222-222222222222'
+    const featureId = '33333333-3333-4333-8333-333333333333'
+    const iconId = '44444444-4444-4444-8444-444444444444'
+    const geometry = { type: kind, coordinates: kind === 'Point' ? [37.2, 55.1] : [[37.2, 55.1], [37.3, 55.2]] }
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input)
+      if (path === '/api/mobilemap/source') return json({ source: 'gis' })
+      if (path === '/api/auth/session') return json(session)
+      if (path === '/api/tickets/today') return json([])
+      if (path === '/api/gis/basemap') return json({ provider: 'yandex', scriptUrl: 'https://api-maps.yandex.ru/2.1/?apikey=test&lang=ru_RU&csp=true' })
+      if (path === '/api/gis/maps') return json({ rows: [{ id: mapId, name: 'Чехов', report: { total: 1 } }] })
+      if (path === `/api/gis/maps/${mapId}/layers`) return json({ rows: [{ id: layerId, name: 'Муфты', count: 1, position: 1, version: 1, defaultVisible: true }] })
+      if (path === `/api/gis/maps/${mapId}/bounds`) return json({ xmin: 37.1, ymin: 55, xmax: 37.3, ymax: 55.2 })
+      if (path.startsWith(`/api/gis/maps/${mapId}/features?`)) return json({ type: 'FeatureCollection', features: [{ type: 'Feature', id: featureId, geometry: { type: 'Point', coordinates: [37.2, 55.1] }, properties: { id: featureId, layer_id: layerId, kind: 'Point', title: 'Муфта 1', iconColor: '#0288d1', iconId } }] })
+      if (path === `/api/gis/features/${featureId}`) return json({ id: featureId, layer_id: layerId, map_id: mapId, layer_name: 'Муфты', title: 'Муфта 1', number: 1, kind, description: '', geometry, style: { iconColor: '#0288d1' }, version: 1, closureFull })
+      if (path === '/api/gis/reports') return respond(init)
+      throw new Error(path)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<App />)
+    await screen.findByRole('heading', { name: 'Заявки сегодня' })
+    fireEvent.click(screen.getByRole('button', { name: 'Карта' }))
+    const map = await screen.findByRole('application', { name: 'Карта сети' })
+    await waitFor(() => expect(map.querySelector('.ymaps-feature')).not.toBeNull())
+    fireEvent.click(map.querySelector('.ymaps-feature')!)
+    await screen.findByLabelText('Описание работ')
+    return { fetchMock, map, iconId }
+  }
+
+  it.each([
+    { marks: ['С нуля'], color: '#9c27b0', full: false },
+    { marks: ['Муфта забита'], color: '#ff5252', full: true },
+    { marks: ['С нуля', 'Муфта забита'], color: '#ff5252', full: true },
+  ])('передает отметки $marks и сразу обновляет точку по ответу GIS', async ({ marks, color, full }) => {
+    const { fetchMock, map, iconId } = await openMarkedReport({ respond: () => json({ id: 'report', repeated: false, feature: { closureFull: full, iconColor: color } }, 201) })
+    for (const mark of marks) fireEvent.click(screen.getByRole('checkbox', { name: mark, exact: true }))
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить отчёт' }))
+    expect(await screen.findByText('Добавьте текст или фотографию')).toBeTruthy()
+    expect(fetchMock.mock.calls.filter(([path]) => path === '/api/gis/reports')).toHaveLength(0)
+    fireEvent.change(screen.getByLabelText('Описание работ'), { target: { value: 'Сварили муфту' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить отчёт' }))
+    await screen.findByText('Отчёт отправлен')
+    const body = fetchMock.mock.calls.find(([path]) => path === '/api/gis/reports')![1]!.body as FormData
+    expect(body.get('closureFull')).toBe(full ? 'true' : null)
+    expect(body.get('fromScratch')).toBe(marks.includes('С нуля') ? 'true' : null)
+    await waitFor(() => expect((map.querySelector('.ymaps-feature') as HTMLElement).dataset.icon).toBe(`/api/gis/assets/${iconId}?color=${color.slice(1)}`))
+    expect(Boolean(screen.queryByText('Муфта забита. Снять отметку может только проектировщик в GIS.'))).toBe(full)
+  })
+
+  it('читает признак заполнения и обычный отчет не снимает отметку', async () => {
+    const { fetchMock } = await openMarkedReport({ closureFull: true })
+    expect(screen.getByText('Муфта забита. Снять отметку может только проектировщик в GIS.')).toBeTruthy()
+    expect((screen.getByRole('checkbox', { name: 'Муфта забита', exact: true }) as HTMLInputElement).checked).toBe(false)
+    fireEvent.change(screen.getByLabelText('Описание работ'), { target: { value: 'Проверили муфту' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить отчёт' }))
+    await screen.findByText('Отчёт отправлен')
+    const body = fetchMock.mock.calls.find(([path]) => path === '/api/gis/reports')![1]!.body as FormData
+    expect(body.get('closureFull')).toBeNull()
+    expect(screen.getByText('Муфта забита. Снять отметку может только проектировщик в GIS.')).toBeTruthy()
+  })
+
+  it('скрывает отметки, если карточка возвращает геометрию линии', async () => {
+    await openMarkedReport({ kind: 'LineString' })
+    expect(screen.queryByRole('checkbox', { name: 'С нуля', exact: true })).toBeNull()
+    expect(screen.queryByRole('checkbox', { name: 'Муфта забита', exact: true })).toBeNull()
+  })
+
+  it('объясняет MARK_POINT_ONLY, сохраняет черновик и время при повторе', async () => {
+    const { fetchMock } = await openMarkedReport({ respond: () => json({ code: 'MARK_POINT_ONLY', message: 'upstream' }, 400) })
+    fireEvent.click(screen.getByRole('checkbox', { name: 'С нуля', exact: true }))
+    fireEvent.change(screen.getByLabelText('Описание работ'), { target: { value: 'Работы' } })
+    for (let i = 0; i < 2; i++) {
+      fireEvent.click(screen.getByRole('button', { name: 'Отправить отчёт' }))
+      await screen.findByText('Отметки «С нуля» и «Муфта забита» доступны только для точек. Выберите точку на карте.')
+      expect((screen.getByRole('checkbox', { name: 'С нуля', exact: true }) as HTMLInputElement).checked).toBe(true)
+      expect((screen.getByLabelText('Описание работ') as HTMLTextAreaElement).value).toBe('Работы')
+    }
+    const bodies = fetchMock.mock.calls.filter(([path]) => path === '/api/gis/reports').map(([, init]) => init!.body as FormData)
+    expect(bodies).toHaveLength(2)
+    expect(bodies[0].get('external_report_id')).toBe(bodies[1].get('external_report_id'))
+    expect(bodies[0].get('occurred_at')).toBe(bodies[1].get('occurred_at'))
+  })
+
   it('получает карту только через внутренний API и показывает объекты выбранных слоёв', async () => {
     const mapId = '11111111-1111-4111-8111-111111111111'
     const layerId = '22222222-2222-4222-8222-222222222222'
@@ -795,25 +882,28 @@ describe('Заявки', () => {
     expect(form.get('gis_text')).toBe('')
   })
 
-  it('выбирает объект подключения полноценной картой и запоминает карту', async () => {
+  it.each(['connection', 'repair'] as const)('показывает отметки после выбора GIS и отправляет их из заявки: %s', async kind => {
     const mapId = '11111111-1111-4111-8111-111111111111'
     const layerId = '22222222-2222-4222-8222-222222222222'
     const featureId = '33333333-3333-4333-8333-333333333333'
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const path = String(input)
       if (path === '/api/mobilemap/source') return json({ source: 'gis' })
       if (path === '/api/auth/session') return json(session)
-      if (path === '/api/tickets/today') return json([ticket])
+      if (path === '/api/tickets/today') return json([{ ...ticket, kind }])
       if (path === '/api/gis/basemap') return json({ provider: 'yandex-v3', scriptUrl: 'https://api-maps.yandex.ru/v3/?apikey=test&lang=ru_RU' })
       if (path === '/api/gis/maps') return json({ rows: [{ id: mapId, name: 'Чехов', created_at: '2026-09-16T09:00:00Z', report: { total: 1 } }] })
       if (path === `/api/gis/maps/${mapId}/layers`) return json({ rows: [{ id: layerId, name: 'Муфты', position: 1, count: 2600, version: 1 }] })
       if (path === `/api/gis/maps/${mapId}/bounds`) return json({ xmin: 37.1, ymin: 55, xmax: 37.3, ymax: 55.2 })
       if (path.startsWith(`/api/gis/maps/${mapId}/features?bbox=`)) return json({ type: 'FeatureCollection', truncated: false, limit: 40000, features: [{ type: 'Feature', id: featureId, geometry: { type: 'Point', coordinates: [37.2, 55.1] }, properties: { id: featureId, layer_id: layerId, kind: 'Point', title: 'Муфта 1', iconColor: '#0288d1' } }] })
       if (path === `/api/gis/features/${featureId}`) return json({ id: featureId, layer_id: layerId, map_id: mapId, layer_name: 'Муфты', title: 'Муфта 1', number: 42, kind: 'Point', description: '', geometry: { type: 'Point', coordinates: [37.2, 55.1] }, style: {}, version: 3 })
+      if (path === '/api/tickets/32412/connection-completion' || path === '/api/tickets/32412/ticket-completion') return json({ id: 'done', ticket_id: 32412, completion_status: 'completed', gis_status: 'delivered' })
       throw new Error(`Неожиданный запрос: ${path}`)
-    }))
+    })
+    vi.stubGlobal('fetch', fetchMock)
     render(<App />)
     fireEvent.click(await screen.findByRole('button', { name: /СНТ Волга/ }))
+    expect(screen.queryByRole('checkbox', { name: 'С нуля', exact: true })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Выбрать объект на карте' }))
     const map = await screen.findByRole('application', { name: 'Карта сети' })
     expect(screen.queryByText(/^Слои/)).toBeNull()
@@ -825,6 +915,30 @@ describe('Заявки', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Выбрать этот объект' }))
     expect(await screen.findByLabelText('Отчёт для GIS')).toBeTruthy()
     expect(localStorage.getItem('tp-pwa.gis.selected-map')).toBe(mapId)
+    fireEvent.click(screen.getByRole('checkbox', { name: 'С нуля', exact: true }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Муфта забита', exact: true }))
+    fireEvent.click(screen.getByRole('button', { name: 'Не отправлять в GIS' }))
+    expect(screen.queryByRole('checkbox', { name: 'С нуля', exact: true })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Выбрать объект на карте' }))
+    const reopenedMap = await screen.findByRole('application', { name: 'Карта сети' })
+    await waitFor(() => expect(reopenedMap.querySelector('.gis-v3-marker')).not.toBeNull())
+    fireEvent.click(reopenedMap.querySelector('.gis-v3-marker')!)
+    fireEvent.click(await screen.findByRole('button', { name: 'Выбрать этот объект' }))
+    expect((screen.getByRole('checkbox', { name: 'С нуля', exact: true }) as HTMLInputElement).checked).toBe(false)
+    expect((screen.getByRole('checkbox', { name: 'Муфта забита', exact: true }) as HTMLInputElement).checked).toBe(false)
+    fireEvent.click(screen.getByRole('checkbox', { name: 'С нуля', exact: true }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Муфта забита', exact: true }))
+    if (kind === 'repair') fireEvent.change(screen.getByLabelText('Что выполнено'), { target: { value: 'Выполнено' } })
+    fireEvent.click(screen.getByRole('button', { name: kind === 'repair' ? 'Завершить ремонт' : 'Отметить выполненной' }))
+    expect(await screen.findByText('Добавьте текст отчёта GIS или фотографию')).toBeTruthy()
+    fireEvent.change(screen.getByLabelText('Отчёт для GIS'), { target: { value: 'Сварили' } })
+    fireEvent.click(screen.getByRole('button', { name: kind === 'repair' ? 'Завершить ремонт' : 'Отметить выполненной' }))
+    await screen.findByText('Заявка отмечена выполненной. Отчёт передан в GIS.')
+    const submission = fetchMock.mock.calls.find(([path]) => String(path).endsWith(kind === 'repair' ? '/ticket-completion' : '/connection-completion'))!
+    const body = submission[1]!.body as FormData
+    expect(body.get('closureFull')).toBe('true')
+    expect(body.get('fromScratch')).toBe('true')
+    expect(body.get('feature_id')).toBe(featureId)
   })
 })
 

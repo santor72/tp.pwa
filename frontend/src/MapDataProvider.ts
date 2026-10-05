@@ -9,9 +9,9 @@ export type GisFeatureStyle = {
   lineColor?: string; lineWidth?: number; lineOpacity?: number
   fillColor?: string; fillOpacity?: number
 }
-export type GisFeature = { type: 'Feature'; id: string; geometry: { type: 'Point' | 'LineString' | 'Polygon'; coordinates: unknown }; properties: { id: string; layer_id: string; title?: string; number?: number; kind: string; interactive?: boolean } & GisFeatureStyle }
+export type GisFeature = { type: 'Feature'; id: string; geometry: { type: 'Point' | 'LineString' | 'Polygon'; coordinates: unknown }; properties: { id: string; layer_id: string; title?: string; number?: number; kind: string; closureFull?: boolean; interactive?: boolean } & GisFeatureStyle }
 export type GisFeatureCollection = { type: 'FeatureCollection'; truncated: boolean; limit: number; features: GisFeature[] }
-export type GisFeatureDetails = { id: string; layer_id: string; map_id: string; layer_name: string; title: string; number: number; kind: string; description: string; geometry: GisFeature['geometry']; style: Record<string, unknown>; version: number }
+export type GisFeatureDetails = { id: string; layer_id: string; map_id: string; layer_name: string; title: string; number: number; kind: string; description: string; geometry: GisFeature['geometry']; style: Record<string, unknown>; version: number; closureFull?: boolean }
 
 export type MapFeatureQuery = {
   mapId: string

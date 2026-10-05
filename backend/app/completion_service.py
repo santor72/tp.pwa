@@ -32,7 +32,8 @@ class ConnectionCompletionService:
                     techportal_text: str, gis_text: str, feature_id: UUID | None,
                     photos: list[dict[str, Any]], technician_name: str, technician_last_name: str = '',
                     upstream_cookies: dict[str, str] | None = None,
-                    ticket_kind: Literal['connection', 'repair'] = 'connection') -> Any:
+                    ticket_kind: Literal['connection', 'repair'] = 'connection',
+                    closure_full: bool = False, from_scratch: bool = False) -> Any:
         await self._tickets.assert_ticket_assigned(actor.techportal_user_id, day, ticket_id, ticket_kind)
         if ticket_kind == 'repair' and not techportal_text:
             raise ApiError(422, 'REPAIR_COMMENT_REQUIRED', 'Опишите выполненные работы')
@@ -42,8 +43,12 @@ class ConnectionCompletionService:
             raise ApiError(503, 'GIS_PHOTO_STORAGE_NOT_CONFIGURED', 'Для отправки фотографий в GIS требуется настроенное S3-хранилище')
         if photos and not self.photos_available and not feature_id:
             raise ApiError(503, 'PHOTO_STORAGE_NOT_CONFIGURED', 'Загрузка фотографий для заявок не настроена')
+        if (closure_full or from_scratch) and not feature_id:
+            raise ApiError(400, 'MARK_POINT_ONLY', 'Для отметок выберите точку GIS')
         subscriber = await self._tickets.gis_subscriber(actor.techportal_user_id, ticket_id, ticket_kind)
         feature_snapshot = await self._gis.feature(str(feature_id)) if feature_id else {}
+        if (closure_full or from_scratch) and feature_snapshot.get('geometry', {}).get('type') != 'Point':
+            raise ApiError(400, 'MARK_POINT_ONLY', 'Отметки доступны только для точек GIS')
         operation, created = await self._repository.create_or_get(
             idempotency_key=idempotency_key, ticket_id=ticket_id, ticket_kind=ticket_kind, day=day, user_id=actor.user_id,
             technician_external_id=actor.techportal_user_id, technician_name=technician_name,
@@ -51,13 +56,14 @@ class ConnectionCompletionService:
             feature_id=feature_id, feature_snapshot=feature_snapshot, external_report_id=uuid4() if feature_id else None,
             subscriber_login=subscriber.get('login'), subscriber_address=subscriber.get('address'),
             techportal_text=techportal_text, gis_text=gis_text, subscriber=subscriber, photos=[], completion_status='prepared',
-            gis_status='not_ready' if feature_id else 'not_requested',
+            gis_status='not_ready' if feature_id else 'not_requested', closure_full=closure_full, from_scratch=from_scratch,
             techportal_gis_link_status='waiting_gis' if feature_id else 'not_requested',
         )
         if not created:
             if (operation.user_id != actor.user_id or operation.ticket_id != ticket_id or operation.day != day
                     or operation.techportal_text != techportal_text or operation.gis_text != gis_text
-                    or operation.feature_id != feature_id or operation.ticket_kind != ticket_kind):
+                    or operation.feature_id != feature_id or operation.ticket_kind != ticket_kind
+                    or operation.closure_full != closure_full or operation.from_scratch != from_scratch):
                 raise ApiError(409, 'COMPLETION_IDEMPOTENCY_CONFLICT', 'Этот ключ уже использован для другого отчёта')
             return operation
         try:
@@ -159,6 +165,8 @@ class ConnectionCompletionService:
                 'occurred_at': operation.created_at.astimezone(UTC).isoformat().replace('+00:00', 'Z'),
                 'subscriber': operation.subscriber,
                 'text': operation.gis_text,
+                'closureFull': operation.closure_full,
+                'fromScratch': operation.from_scratch,
             }, photos)
         except ServiceUnavailableError as exc:
             try:

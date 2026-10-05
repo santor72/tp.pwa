@@ -3,6 +3,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
+from pydantic import AwareDatetime
 
 from app.dependencies import require_gis_csrf, require_gis_data_session
 from app.config import Settings, get_settings
@@ -93,9 +94,12 @@ async def create_report(
     completion_id: UUID = Form(),
     text: str = Form(default='', max_length=10_000),
     photos: list[UploadFile] = File(default=[]),
+    closureFull: bool = Form(default=False),
+    fromScratch: bool = Form(default=False),
+    occurred_at: AwareDatetime | None = Form(default=None),
     session_pair: tuple[str, SessionData] = Depends(require_gis_csrf),
 ):
-    """Create a manual map report. Ticket 1 is the agreed sentinel until map reports get their own GIS type."""
+    """Create a work report on an existing GIS object, without a connection ticket."""
     report_text = text.strip()
     if len(photos) > 5:
         raise ApiError(422, 'GIS_REPORT_PHOTOS_LIMIT', 'В одном отчёте можно загрузить до 5 фотографий')
@@ -108,11 +112,12 @@ async def create_report(
     technician_last_name = (session.user.last_name or '').strip()
     metadata = {
         'external_report_id': str(external_report_id),
-        'ticket_id': 1,
         'completion_id': str(completion_id),
         'feature_id': str(feature_id),
         'technician': {'id': str(session.user.id), 'name': technician_name, 'last_name': technician_last_name},
-        'occurred_at': datetime.now(UTC).isoformat().replace('+00:00', 'Z'),
+        'occurred_at': (occurred_at or datetime.now(UTC)).isoformat().replace('+00:00', 'Z'),
         'text': report_text,
+        'closureFull': closureFull,
+        'fromScratch': fromScratch,
     }
     return await request.app.state.gis_client.create_report(metadata, payload_photos)
