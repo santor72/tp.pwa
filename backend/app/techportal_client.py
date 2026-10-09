@@ -32,6 +32,36 @@ class TechPortalClient:
     def user_api_available(self) -> bool:
         return bool(self._settings.tp_origin_url)
 
+    async def keepalive(self, cookies: dict[str, str]) -> dict[str, str]:
+        """Touch the employee's TechPortal session and return any updated cookies."""
+        if not cookies:
+            raise TechPortalAuthError()
+        headers = {
+            "Accept": "application/json, text/plain, */*",
+            "Referer": f"{self._settings.tp_origin_url}/",
+        }
+        try:
+            async with httpx.AsyncClient(
+                timeout=self._settings.tp_api_timeout_seconds,
+                transport=self._transport,
+                cookies=cookies,
+            ) as client:
+                response = await client.get(f"{self._settings.tp_origin_url}/csrf-token", headers=headers)
+                if response.status_code in {401, 403} or response.is_redirect:
+                    raise TechPortalAuthError()
+                response.raise_for_status()
+                payload = response.json()
+                if not isinstance(payload, dict) or not isinstance(payload.get("_csrf"), str) or not payload["_csrf"]:
+                    raise TechPortalResponseError()
+                return dict(client.cookies.items())
+        except TechPortalAuthError:
+            raise
+        except httpx.HTTPError as exc:
+            logger.warning("ТехПортал keepalive недоступен", extra={"event": "techportal.keepalive.unavailable", "fields": {"error": type(exc).__name__}})
+            raise ServiceUnavailableError("ТехПортал временно недоступен") from exc
+        except ValueError as exc:
+            raise TechPortalResponseError() from exc
+
     async def tickets(
         self,
         user_id: int | str | None,

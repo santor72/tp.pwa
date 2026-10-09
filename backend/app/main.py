@@ -39,6 +39,7 @@ from app.mobilemap_client import MobileMapClient
 from app.routers.completions import router as completions_router
 from app.payment_telemetry import Trace, current_trace, span
 from app.payment_runtime_registry import PaymentRuntimeRegistry
+from app.techportal_keepalive import run_techportal_keepalive
 
 settings = get_settings()
 configure_logging(settings.log_level)
@@ -73,12 +74,22 @@ async def lifespan(app: FastAPI):
     stop = asyncio.Event()
     await registry.register(owner, 'api')
     heartbeat = asyncio.create_task(registry.heartbeat(owner, 'api', stop))
+    techportal_keepalive_stop = asyncio.Event()
+    techportal_keepalive_task = asyncio.create_task(
+        run_techportal_keepalive(
+            app.state.session_store,
+            app.state.services.techportal_client,
+            techportal_keepalive_stop,
+        )
+    )
     try:
         yield
     finally:
         stop.set()
+        techportal_keepalive_stop.set()
         heartbeat.cancel()
-        await asyncio.gather(heartbeat, return_exceptions=True)
+        techportal_keepalive_task.cancel()
+        await asyncio.gather(heartbeat, techportal_keepalive_task, return_exceptions=True)
         try:
             await registry.unregister(owner)
         finally:

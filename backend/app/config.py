@@ -90,8 +90,8 @@ class Settings(BaseSettings):
 
     session_cookie_name: str = "tp_pwa_session"
     session_cookie_secure: bool = True
-    session_absolute_ttl_seconds: int = Field(default=43_200, gt=0)
-    session_idle_ttl_seconds: int = Field(default=28_800, gt=0)
+    session_absolute_ttl_seconds: int = Field(default=2_592_000, gt=0)
+    session_idle_ttl_seconds: int = Field(default=259_200, gt=0)
 
     esb_base_url: str = ""
     esb_base_token: str = ""

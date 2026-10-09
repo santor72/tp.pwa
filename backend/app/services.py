@@ -33,6 +33,7 @@ class ApplicationServices:
     engine: AsyncEngine
     sessions: async_sessionmaker
     auth_provider: TechPortalAuthProvider
+    techportal_client: TechPortalClient
     ticket_service: TicketService
     payment_addresses: PaymentAddressService
     payment_catalog: PaymentProductCatalog
@@ -71,6 +72,7 @@ def create_application_services(settings: Settings, cache_redis: Redis) -> Appli
         engine=engine,
         sessions=sessions,
         auth_provider=TechPortalAuthProvider(settings),
+        techportal_client=techportal_client,
         ticket_service=ticket_service,
         payment_addresses=PaymentAddressService(settings, EsbClient(settings), cache),
         payment_catalog=payment_catalog,
